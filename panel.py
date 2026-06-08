@@ -16,8 +16,8 @@ app = Flask(__name__)
 app.secret_key = secrets.token_hex(16)
 
 # Owner credentials
-OWNER_USER = "Vishal"
-OWNER_PASS = "vishal"
+OWNER_USER = "God"
+OWNER_PASS = "pawan"
 
 # Shared secret keys — must match Android app
 HMAC_SECRET = "aLx_R4j_2024_sEcReT_kEy_X9z"
@@ -28,7 +28,7 @@ ATTACK_PROXY_URL = os.environ.get("ATTACK_PROXY_URL", "http://52.66.29.214:3000/
 PROXY_SECRET = "THUNDER_PROXY_2024_SECRET"
 
 # MongoDB
-MONGO_URI = os.environ.get("MONGO_URI", "mongodb+srv://srinivasaraothotathotavishnusa_db_user:YJVeh5aKO3ffqfh4@cluster0.w0nfvev.mongodb.net/?appName=Cluster0")
+MONGO_URI = os.environ.get("MONGO_URI", "mongodb+srv://doremondg55_db_user:UHw7eqhBHqGxl2BF@cluster0.o8hbxmd.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0")
 mongo_client = MongoClient(MONGO_URI)
 db = mongo_client['alonexraj_panel']
 
@@ -80,7 +80,7 @@ def health_check():
     return jsonify({
         'status': 'alive',
         'timestamp': datetime.utcnow().isoformat() + 'Z',
-        'service': 'ALONExRAJ Panel',
+        'service': 'GODxPAWAN Panel',
         'version': '2.0'
     })
 
@@ -302,7 +302,7 @@ body{font-family:'Inter',sans-serif;min-height:100vh;display:flex;align-items:ce
 <div class="ig"><input name="password" type="password" placeholder="Password" required></div>
 <button type="submit" class="btn">Submit</button>
 </form>
-<div class="ft">ALONExRAJ Premium Panel</div>
+<div class="ft">GODxPAWAN Premium Panel</div>
 </div>
 </div>
 </body>
@@ -365,7 +365,7 @@ tr:hover td{background:#f9fafb}
 </head>
 <body>
 <div class="topbar">
-<div class="brand">ALONExRAJ</div>
+<div class="brand">GODxPAWAN</div>
 <div class="user-info">
 <span>{{ display_name }}</span>
 {% if role == 'reseller' %}<span class="credit-badge">{{ credits }} Credits</span>{% endif %}
@@ -649,7 +649,7 @@ def dashboard():
         r = find_reseller(session['username'])
         credits = r['credits'] if r else 0
     return render_template_string(DASHBOARD_TEMPLATE,
-        title='ALONExRAJ Panel',
+        title='GODxPAWAN Panel',
         role=session['role'],
         username=session['username'],
         display_name=session['display_name'],
@@ -985,7 +985,7 @@ def upload_apk():
     changelog = request.form.get('changelog', '')
 
     # Save APK
-    filename = f"ALONExRAJ_v{version_code}.apk"
+    filename = f"GODxPAWAN_v{version_code}.apk"
     filepath = os.path.join(UPLOAD_FOLDER, filename)
     file.save(filepath)
 
@@ -1022,7 +1022,7 @@ if __name__ == '__main__':
     # Disable debug in production for better performance
     debug_mode = os.environ.get('FLASK_DEBUG', 'False').lower() == 'true'
     
-    print(f"[✓] Starting ALONExRAJ Panel on port {port}")
+    print(f"[✓] Starting GODxPAWAN Panel on port {port}")
     print(f"[✓] Debug mode: {debug_mode}")
     print(f"[✓] Health check available at: http://localhost:{port}/health")
     print(f"[✓] Keep-alive active - will ping every 4 minutes")
