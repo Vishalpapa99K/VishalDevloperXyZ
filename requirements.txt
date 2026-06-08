@@ -1,0 +1,6 @@
+Flask
+pymongo
+pycryptodome
+requests
+cryptography
+python-dotenv
