@@ -1,0 +1,21 @@
+# Environment files (DO NOT COMMIT — contain secrets)
+.env
+*.env
+!*.env.example
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+.venv/
+venv/
+
+# IDE
+.vscode/
+.idea/
+
+# Logs
+*.log
