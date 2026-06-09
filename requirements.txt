@@ -4,3 +4,4 @@ pycryptodome
 requests
 cryptography
 python-dotenv
+dnspython
