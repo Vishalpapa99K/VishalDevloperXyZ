@@ -144,7 +144,7 @@ def health_check():
     return jsonify({
         'status': 'alive',
         'timestamp': datetime.utcnow().isoformat() + 'Z',
-        'service': 'GODxPAWAN Panel',
+        'service': 'Ddos primium Panel',
         'version': '2.0'
     })
 
@@ -415,7 +415,7 @@ body{font-family:'Inter',sans-serif;min-height:100vh;display:flex;align-items:ce
 <div class="ig"><input name="password" type="password" placeholder="Password" required></div>
 <button type="submit" class="btn">Submit</button>
 </form>
-<div class="ft">GODxPAWAN Premium Panel</div>
+<div class="ft">Ddos Premium Panel</div>
 </div>
 </div>
 <script>
@@ -525,7 +525,7 @@ tr:hover td{background:var(--row-hover)}
 </head>
 <body>
 <div class="topbar">
-<div class="brand">GODxPAWAN</div>
+<div class="brand">DDOS PANEL</div>
 <div class="user-info">
 <span>{{ display_name }}</span>
 {% if role == 'reseller' %}<span class="credit-badge">{{ credits }} Credits</span>{% endif %}
@@ -1020,7 +1020,7 @@ def dashboard():
         r = find_reseller(session['username'])
         credits = r['credits'] if r else 0
     return render_template_string(DASHBOARD_TEMPLATE,
-        title='GODxPAWAN Panel',
+        title='DDOS PANEL Panel',
         role=session['role'],
         username=session['username'],
         display_name=session['display_name'],
@@ -1605,7 +1605,7 @@ def upload_apk():
     changelog = request.form.get('changelog', '')
 
     # Save APK
-    filename = f"GODxPAWAN_v{version_code}.apk"
+    filename = f"_v{version_code}.apk"
     filepath = os.path.join(UPLOAD_FOLDER, filename)
     file.save(filepath)
 
