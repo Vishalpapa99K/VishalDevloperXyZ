@@ -919,21 +919,42 @@ showResellerList();
 async function deleteReseller(username){if(!confirm('Delete reseller '+username+'?'))return;await api('/api/delete-reseller',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username})});closeModal();render();}
 async function viewResellerDash(username){
 const data=await api('/api/reseller-dashboard?username='+username);
-const keys=data.keys||[];const now=new Date();
+const keys=data.keys||[];const now=new Date();const nowMs=Date.now();
 const history=await api('/api/history?by='+username);
+let liveDevices=0;
+keys.forEach(k=>{Object.values(k.devices_info||{}).forEach(info=>{if(info.last_seen&&(nowMs-new Date(info.last_seen).getTime())<LIVE_WINDOW)liveDevices++;});});
 container.innerHTML=`
 <div class="hero">
 <div class="hero-icon" style="background:linear-gradient(135deg,#a855f7,#7c3aed);box-shadow:0 8px 20px rgba(168,85,247,.35)">${ICONS.users}</div>
-<div class="hero-text"><h1>${data.display_name}</h1><p>Reseller dashboard overview</p></div>
+<div class="hero-text"><h1>${data.display_name}</h1><p>Reseller dashboard overview — full control</p></div>
 <div class="hero-actions"><button class="hero-btn outline" onclick="render()">← Back</button></div>
 </div>
 <div class="cards">
 <div class="stat-card sc-blue"><div class="icon">${ICONS.key}</div><div class="label">Active Keys</div><div class="value">${keys.length}</div></div>
 <div class="stat-card sc-orange"><div class="icon">${ICONS.coin}</div><div class="label">Credits</div><div class="value">${data.credits}</div></div>
+<div class="stat-card sc-pink"><div class="icon">${ICONS.spark}</div><div class="label">Live Now</div><div class="value">${liveDevices}<span style="font-size:13px;font-weight:500;opacity:.85;margin-left:5px">🟢</span></div></div>
 <div class="stat-card sc-purple"><div class="icon">${ICONS.rate}</div><div class="label">All Time Keys</div><div class="value">${history.length}</div></div>
 </div>
-<div class="section"><div class="section-head"><div class="se-icon">${ICONS.key}</div><div class="se-text"><h3>Active Keys</h3><p>Currently usable</p></div></div><div class="table-wrap"><table><thead><tr><th>Name</th><th>Key</th><th>Expires</th><th>Devices</th></tr></thead><tbody>${keys.map(k=>`<tr><td><strong>${k.name}</strong></td><td class="mono">${k.key}</td><td>${k.expires_at?new Date(k.expires_at).toLocaleString():'Not Redeemed'}</td><td>${(k.locked_device_ids||[]).length}/${k.device_limit}</td></tr>`).join('')||`<tr><td colspan="4"><div class="empty"><div class="empty-icon">${ICONS.empty}</div><p>No active keys</p></div></td></tr>`}</tbody></table></div></div>
+<div class="section"><div class="section-head"><div class="se-icon">${ICONS.key}</div><div class="se-text"><h3>Active Keys</h3><p>Click 📱 to view devices, 🗑️ to delete</p></div></div><div class="table-wrap"><table><thead><tr><th>Name</th><th>Key</th><th>Status</th><th>Time Left</th><th>Devices</th><th></th><th></th></tr></thead><tbody>${keys.map(k=>{
+  const x=k.expires_at?new Date(k.expires_at)<now:false;
+  const unredeemed=!k.redeemed;
+  const statusBadge=x?'<span class="badge badge-expired">Expired</span>':(unredeemed?'<span class="badge badge-unredeemed">Pending</span>':'<span class="badge badge-active">Active</span>');
+  const timeCell=k.expires_at?`<span class="countdown" data-exp="${k.expires_at}">…</span>`:'<span style="color:#9ca3af;font-size:11px">awaits redeem</span>';
+  const liveCount=Object.values(k.devices_info||{}).filter(d=>d.last_seen&&(nowMs-new Date(d.last_seen).getTime())<LIVE_WINDOW).length;
+  const liveDot=liveCount>0?`<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#10b981;box-shadow:0 0 6px #10b981;animation:pulse 1.5s infinite;margin-right:5px"></span>`:'';
+  const liveTxt=liveCount>0?`<span style="color:#10b981;font-size:10px;font-weight:600;margin-left:4px">(${liveCount} live)</span>`:'';
+  return `<tr><td><strong>${k.name}</strong></td><td class="mono" style="cursor:pointer" onclick="copyKey('${k.key}')" title="Click to copy">${k.key}</td><td>${statusBadge}</td><td>${timeCell}</td><td>${liveDot}${(k.locked_device_ids||[]).length}/${k.device_limit}${liveTxt}</td><td><button class="btn btn-blue" style="padding:6px 12px;font-size:11px" onclick="showDevices('${k.id}',this)">📱 Devices</button></td><td><button class="btn btn-red" style="padding:6px 12px;font-size:11px" onclick="deleteKeyFromResellerView('${k.id}','${username}')">Delete</button></td></tr>`;
+}).join('')||`<tr><td colspan="7"><div class="empty"><div class="empty-icon">${ICONS.empty}</div><p>No active keys</p></div></td></tr>`}</tbody></table></div></div>
+
 <div class="section"><div class="section-head"><div class="se-icon" style="background:linear-gradient(135deg,#3b82f6,#1d4ed8);box-shadow:0 4px 12px rgba(59,130,246,.25)">${ICONS.rate}</div><div class="se-text"><h3>Key History</h3><p>All-time generated keys</p></div></div><div class="table-wrap" style="max-height:340px;overflow-y:auto"><table><thead><tr><th>Key</th><th>Created</th><th>Duration</th></tr></thead><tbody>${history.map(h=>`<tr><td class="mono">${h.key}</td><td>${new Date(h.created_at).toLocaleString()}</td><td>${h.duration_value} ${h.duration_unit}</td></tr>`).join('')||`<tr><td colspan="3"><div class="empty"><div class="empty-icon">${ICONS.empty}</div><p>No history</p></div></td></tr>`}</tbody></table></div></div>`;
+}
+
+// Helper — delete key from reseller-dash view, then re-open same view
+async function deleteKeyFromResellerView(keyId, username){
+  if(!confirm('Delete this key permanently?'))return;
+  const r=await api('/api/delete-key',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:keyId})});
+  if(r.error){alert(r.error);return}
+  viewResellerDash(username); // refresh same view
 }
 
 async function showHistory(){
@@ -1141,8 +1162,11 @@ def api_keys():
     if is_reseller():
         keys = [k for k in keys if k.get('generated_by') == session['username']]
     elif is_owner():
-        # Owner sees only their own keys (not reseller-generated)
-        keys = [k for k in keys if k.get('generated_by') in (session['username'], 'owner')]
+        # Owner can optionally filter — default shows ALL keys (own + resellers')
+        scope = request.args.get('scope', 'all')
+        if scope == 'mine':
+            keys = [k for k in keys if k.get('generated_by') in (session['username'], 'owner')]
+        # else 'all' — no filter, owner sees everything
     return jsonify(keys)
 
 @app.route('/api/resellers')
