@@ -926,11 +926,8 @@ def api_keys():
     if is_reseller():
         keys = [k for k in keys if k.get('generated_by') == session['username']]
     elif is_owner():
-        # Owner can optionally filter — default shows ALL keys (own + resellers')
-        scope = request.args.get('scope', 'all')
-        if scope == 'mine':
-            keys = [k for k in keys if k.get('generated_by') in (session['username'], 'owner')]
-        # else 'all' — no filter, owner sees everything
+        # Owner sees only their own keys (not reseller-generated) on main dashboard
+        keys = [k for k in keys if k.get('generated_by') in (session['username'], 'owner')]
     return jsonify(keys)
 
 @app.route('/api/resellers')
