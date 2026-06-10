@@ -47,48 +47,50 @@ for _p in _env_candidates:
 app = Flask(__name__)
 
 # ══════════════════════════════════════════════════════════════════
-# CONFIG — ALL values from .env (no hardcoded fallbacks)
-# Missing required vars will fail fast at startup with a clear error.
+# CONFIG — values from .env, fallback to empty string
+# Set them in alonexraj.env (local) OR Render/Railway env vars (production)
 # ══════════════════════════════════════════════════════════════════
-def _required_env(key, default=None):
-    val = os.environ.get(key)
-    if val is None or val == '':
-        if default is not None:
-            return default
-        raise RuntimeError(f"[FATAL] Missing required env var: {key}. Set it in alonexraj.env or environment.")
-    return val
+app.secret_key = os.getenv('FLASK_SECRET_KEY', '') or secrets.token_hex(16)
 
-app.secret_key = _required_env('FLASK_SECRET_KEY', secrets.token_hex(16))
+# Owner credentials
+OWNER_USER = os.getenv('OWNER_USER', '')
+OWNER_PASS = os.getenv('OWNER_PASS', '')
 
-# Owner credentials (REQUIRED)
-OWNER_USER = _required_env('OWNER_USER')
-OWNER_PASS = _required_env('OWNER_PASS')
+# Shared secret keys — must match Android app
+HMAC_SECRET = os.getenv('HMAC_SECRET', '')
+AES_KEY = os.getenv('AES_KEY', '').encode('utf-8')
 
-# Shared secret keys — must match Android app (REQUIRED)
-HMAC_SECRET = _required_env('HMAC_SECRET')
-AES_KEY = _required_env('AES_KEY').encode('utf-8')
+# Attack API — INTERNAL ONLY
+ATTACK_API_BASE = os.getenv('ATTACK_API_BASE', '')
+ATTACK_API_KEY = os.getenv('ATTACK_API_KEY', '')
 
-# Attack API — INTERNAL ONLY (REQUIRED)
-ATTACK_API_BASE = _required_env('ATTACK_API_BASE')
-ATTACK_API_KEY = _required_env('ATTACK_API_KEY')
+# External Proxy (proxy.py on VPS)
+PROXY_URL = os.getenv('PROXY_URL', '')
+PROXY_SECRET = os.getenv('PROXY_SECRET', '')
+PROXY_METHOD = os.getenv('PROXY_METHOD', 'STUN')
 
-# External Proxy (proxy.py on VPS) (REQUIRED)
-PROXY_URL = _required_env('PROXY_URL')
-PROXY_SECRET = _required_env('PROXY_SECRET')
-PROXY_METHOD = _required_env('PROXY_METHOD', 'STUN')
+# MongoDB
+MONGO_URI = os.getenv('MONGO_URI', '')
+MONGO_DB_NAME = os.getenv('MONGO_DB_NAME', 'alonexraj_panel')
 
-# MongoDB (REQUIRED)
-MONGO_URI = _required_env('MONGO_URI')
-MONGO_DB_NAME = _required_env('MONGO_DB_NAME', 'alonexraj_panel')
-mongo_client = MongoClient(MONGO_URI)
-db = mongo_client[MONGO_DB_NAME]
+# Warn loudly if critical vars are missing — but don't crash on import
+_missing = [k for k, v in {
+    'OWNER_USER': OWNER_USER, 'OWNER_PASS': OWNER_PASS,
+    'HMAC_SECRET': HMAC_SECRET, 'MONGO_URI': MONGO_URI,
+    'PROXY_URL': PROXY_URL,
+}.items() if not v]
+if _missing:
+    print(f"[! WARN] Missing env vars: {', '.join(_missing)}. Configure them in env to enable full functionality.")
 
-# Collections
-keys_col = db['keys']
-connections_col = db['connections']
-resellers_col = db['resellers']
-history_col = db['key_history']
-config_col = db['config']
+mongo_client = MongoClient(MONGO_URI) if MONGO_URI else None
+db = mongo_client[MONGO_DB_NAME] if mongo_client else None
+
+# Collections (None if DB not configured — routes will fail gracefully)
+keys_col = db['keys'] if db is not None else None
+connections_col = db['connections'] if db is not None else None
+resellers_col = db['resellers'] if db is not None else None
+history_col = db['key_history'] if db is not None else None
+config_col = db['config'] if db is not None else None
 
 # Credit rate: 10 credits = 1 hour
 CREDITS_PER_HOUR = int(os.environ.get('CREDITS_PER_HOUR', '10'))
